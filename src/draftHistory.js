@@ -49,6 +49,11 @@ function ownRecord(guildId, lobby) {
 // Recording (called from draft.js)
 // ---------------------------------------------------------------------------
 
+/** One tournament by number, for the recap post. */
+export function getRecord(guildId, id) {
+  return findRecord(guildId, id);
+}
+
 /** Does this lobby point at a record that is really its own? */
 export function hasRecord(guildId, lobby) {
   return Boolean(ownRecord(guildId, lobby));
@@ -189,7 +194,11 @@ function finishOf(record, userId) {
 
 /** How the first round was paired, for the tournament card. */
 const modeLabel = (mode) =>
-  mode === 'aura' ? '⚖️ paired by AURA' : mode === 'manual' ? '✋ matchups picked by the host' : '🎲 random pairing';
+  ({
+    aura: '⚖️ closest AURA totals',
+    seed: '🥇 seeded (strongest v weakest)',
+    manual: '✋ matchups picked by the host',
+  })[mode] || '🎲 random pairing';
 
 function statusText(record) {
   if (record.status === 'finished') {

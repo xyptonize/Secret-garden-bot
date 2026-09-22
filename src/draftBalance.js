@@ -179,9 +179,11 @@ export function firstRoundMatches(count) {
 
 /**
  * @param totals  each team's total aura
- * @param mode    'random' | 'aura' | 'manual' — aura pairs the closest totals
- *                and gives byes to the weakest teams (highest totals); manual
- *                takes the order the host picked
+ * @param mode    'random' | 'aura' | 'seed' | 'manual'
+ *                aura  — closest totals meet, byes to the weakest teams
+ *                seed  — strongest meets weakest, byes to the top seeds (a
+ *                        normal tournament draw: the best teams meet late)
+ *                manual — the order the host picked
  * @param order   for 'manual': team indexes as [a1, b1, a2, b2, …, byes…]
  */
 export function createBracket(totals, mode, rng = Math.random, order = null) {
@@ -194,6 +196,15 @@ export function createBracket(totals, mode, rng = Math.random, order = null) {
     if (!order || order.length !== count || seen.size !== count) {
       throw new Error('manual bracket needs every team exactly once');
     }
+  } else if (mode === 'seed') {
+    // Strongest first, then the top seeds take the byes and the rest are paired
+    // best-against-weakest, so the strong teams can't knock each other out early.
+    const seeds = totals.map((t, i) => i).sort((x, y) => totals[x] - totals[y]);
+    const byes = seeds.slice(0, size - count);
+    const playing = seeds.slice(size - count);
+    const pairs = [];
+    for (let i = 0; i < playing.length / 2; i++) pairs.push(playing[i], playing[playing.length - 1 - i]);
+    order = [...pairs, ...byes];
   } else {
     order =
       mode === 'aura'

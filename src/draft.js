@@ -52,6 +52,7 @@ import {
   syncRecord,
   endRecord,
   recordSub,
+  getRecord,
   hasRecord,
   safeName,
   historyCommand,
@@ -237,6 +238,54 @@ function teamsEmbed(lobby, compact = false) {
   return embed;
 }
 
+/**
+ * The post that stays in the channel after a tournament: who won, who they
+ * beat, the whole path, and how long it took. Everything comes from the bracket
+ * and the saved record, so it reads the same later as it did on the night.
+ */
+function recapEmbed(lobby, guildId, winner) {
+  const { bracket, result } = lobby;
+  const record = lobby.historyId != null ? getRecord(guildId, lobby.historyId) : null;
+  const final = bracket.rounds.at(-1)[0];
+  const runnerUp = final.a === winner ? final.b : final.a;
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle(`🏆 ${safeName(lobby.title)} — ${teamName(winner)} wins`)
+    .setDescription(
+      `**Champions:** ${result.teams[winner].map(nameOf).join(', ')}` +
+        (runnerUp != null ? `\n**Runner-up:** ${teamName(runnerUp)} — ${result.teams[runnerUp].map(nameOf).join(', ')}` : ''),
+    );
+
+  bracket.rounds.forEach((round, r) => {
+    const lines = round
+      .filter((mt) => mt.winner != null && mt.b != null)
+      .map((mt) => `${teamName(mt.winner)} beat ${teamName(mt.winner === mt.a ? mt.b : mt.a)}`);
+    if (lines.length) embed.addFields({ name: roundName(r, bracket.rounds.length), value: lines.join('\n') });
+  });
+
+  const bits = [bracketModeText(bracket.mode), `${result.teams.length} teams`];
+  if (record?.startedAt) {
+    const mins = Math.round((Date.parse(record.endedAt || Date.now()) - Date.parse(record.startedAt)) / 60000);
+    if (Number.isFinite(mins) && mins > 0) bits.push(`${mins} min`);
+  }
+  if (record?.subs?.length) bits.push(`${record.subs.length} sub(s)`);
+  if (lobby.historyId != null) bits.push(`/${config.draftRoot} game ${lobby.historyId}`);
+  else if (lobby.test) bits.push('🧪 test — not saved');
+  embed.setFooter({ text: bits.join(' · ') });
+  return embed;
+}
+
+/** Plain words for a pairing mode, used in replies and on the bracket. */
+export const bracketModeText = (mode) =>
+  mode === 'aura'
+    ? 'closest AURA totals meet'
+    : mode === 'seed'
+      ? 'seeded: strongest meets weakest'
+      : mode === 'manual'
+        ? 'matchups picked by the host'
+        : 'random pairing';
+
 function bracketEmbed(lobby) {
   const { bracket } = lobby;
   const winner = champion(bracket);
@@ -246,11 +295,7 @@ function bracketEmbed(lobby) {
     .setColor(winner != null ? 0xf1c40f : 0x9b59b6)
     .setTitle(
       `🏆 ${lobby.historyId != null ? `Tournament #${lobby.historyId}` : lobby.test ? '🧪 Test bracket (not saved)' : 'Bracket'} — ` +
-        (bracket.mode === 'aura'
-          ? 'paired by AURA'
-          : bracket.mode === 'manual'
-            ? 'matchups picked by the host'
-            : 'random pairing'),
+        bracketModeText(bracket.mode),
     );
 
   bracket.rounds.forEach((round, r) => {
@@ -348,9 +393,7 @@ function components(lobby) {
   );
   if (lobby.result) {
     hostRow.addComponents(
-      button('bracket|random', 'Bracket — random', ButtonStyle.Success, { emoji: '🎲' }),
-      button('bracket|aura', 'Bracket — by AURA', ButtonStyle.Success, { emoji: '⚖️' }),
-      button('bracket|pick', 'Bracket — pick matchups', ButtonStyle.Success, { emoji: '✋' }),
+      button('bracket', 'Start bracket', ButtonStyle.Success, { emoji: '🏁' }),
     );
   }
   rows.push(hostRow);
@@ -1011,7 +1054,10 @@ async function handleLobbyAction(interaction) {
     'pairsel',
     'paircancel',
   ].includes(action);
-  const found = privateMenu ? [arg, store.getDraftLobbies()[arg]] : lobbyByMessage(interaction.message.id);
+  // Private menus carry the lobby's fixed key; the bracket-mode menu carries it
+  // in the second slot (the first is the mode).
+  const key = privateMenu ? arg : action === 'bracket' && arg2 ? arg2 : null;
+  const found = key ? [key, store.getDraftLobbies()[key]] : lobbyByMessage(interaction.message.id);
   const [lobbyId, lobby] = found ?? [];
   if (!lobby) {
     const moved = Object.values(store.getDraftLobbies()).some((l) => l.previousMessageId === interaction.message?.id);
@@ -1263,15 +1309,37 @@ async function handleLobbyAction(interaction) {
 
     case 'bracket': {
       if (!lobby.result) return ephemeral(interaction, 'Draft the teams first.');
+      if (!arg) {
+        // Ask how the first round should be paired.
+        return interaction.reply({
+          flags: MessageFlags.Ephemeral,
+          content: '🏁 **Start the bracket** — how should the first round be paired?',
+          components: [
+            new ActionRowBuilder().addComponents(
+              button(`bracket|seed|${lobbyId}`, 'Seeded', ButtonStyle.Success, { emoji: '🥇' }),
+              button(`bracket|aura|${lobbyId}`, 'Closest AURA', ButtonStyle.Success, { emoji: '⚖️' }),
+              button(`bracket|random|${lobbyId}`, 'Random', ButtonStyle.Success, { emoji: '🎲' }),
+              button(`bracket|pick|${lobbyId}`, 'Pick matchups', ButtonStyle.Primary, { emoji: '✋' }),
+            ),
+          ],
+        });
+      }
       if (arg === 'pick') {
         // The host picks the matchups: start an empty pairing and ask for the first two.
         lobby.pairing = { teams: lobby.result.teams.length, pairs: [] };
         store.persist();
         return interaction.reply({ flags: MessageFlags.Ephemeral, ...pairingView(lobby, lobbyId) });
       }
-      lobby.bracket = createBracket(lobby.result.teams.map(teamTotal), arg === 'aura' ? 'aura' : 'random');
+      const mode = ['aura', 'seed', 'random'].includes(arg) ? arg : 'random';
+      lobby.bracket = createBracket(lobby.result.teams.map(teamTotal), mode);
       if (!lobby.test) startRecord(guildId, lobby, lobbyId);
       saveAll();
+      // From the private menu: answer it, then redraw the lobby message.
+      if (arg2) {
+        await interaction.update({ content: `🏁 Bracket started — ${bracketModeText(mode)}.`, components: [] });
+        await refreshLobbyMessage(interaction.channel, lobby);
+        return undefined;
+      }
       return interaction.update(view(lobby));
     }
 
@@ -1339,11 +1407,15 @@ async function handleLobbyAction(interaction) {
       const ids = champs.filter((p) => !p.mock).map((p) => p.id);
       const gg = champs.map((p) => (p.mock ? nameOf(p) : `<@${p.id}>`)).join(' ');
       const ref = lobby.historyId != null ? ` · tournament **#${lobby.historyId}**` : lobby.test ? ' · 🧪 test, not saved' : '';
+      // Built now, not after the await: a "Cancel bracket" landing in between
+      // would leave nothing to build it from.
+      const recap = winner != null ? recapEmbed(lobby, guildId, winner) : null;
       await interaction.update(view(lobby));
       if (winner != null) {
         await interaction
           .followUp({
-            content: `🏆 **${teamName(winner)}** wins **${lobby.title}**${ref}! GG ${gg}`,
+            content: `🏆 **${teamName(winner)}** wins **${safeName(lobby.title)}**${ref}! GG ${gg}`,
+            embeds: recap ? [recap] : [],
             allowedMentions: { users: ids },
           })
           .catch(() => {});
