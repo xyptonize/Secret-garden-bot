@@ -446,7 +446,7 @@ function renderSection(section, { page, showTier, showDone }) {
  * All the state a page flip needs is encoded in the button ids, so this works
  * just as well after a restart as it does in the original interaction.
  */
-async function buildCompletionView({ guildId, targetId, tier, type, modeShort, page, showDone }) {
+async function buildCompletionView({ guildId, targetId, tier, type, modeShort, page, showDone, force = false }) {
   const apiMode = modeShort === 'vnl' ? 'vanilla' : 'classic';
   const entry = store.findByDiscord(guildId, targetId);
   if (!entry) return { error: `<@${targetId}> hasn't registered.` };
@@ -457,13 +457,20 @@ async function buildCompletionView({ guildId, targetId, tier, type, modeShort, p
   const [maps, tpPbs, proPbs] = await Promise.all([
     kz.getAllMaps(),
     needTp
-      ? kz.getPersonalBests({ player: entry.steamId, mode: apiMode, limit: 1000 })
+      ? kz.getPersonalBests({ player: entry.steamId, mode: apiMode, limit: 1000, force })
       : Promise.resolve([]),
     needPro
-      ? kz.getPersonalBests({ player: entry.steamId, mode: apiMode, hasTeleports: false, limit: 1000 })
+      ? kz.getPersonalBests({ player: entry.steamId, mode: apiMode, hasTeleports: false, limit: 1000, force })
       : Promise.resolve([]),
   ]);
 
+  // When the cached personal bests were fetched, for an honest "as of" line.
+  const fetchedAt = kz.personalBestsFetchedAt({
+    player: entry.steamId,
+    mode: apiMode,
+    hasTeleports: needPro && !needTp ? false : undefined,
+    limit: 1000,
+  });
   const asMap = (pbs) => new Map(pbs.map((r) => [courseKey(r.map?.name, r.course?.name), r]));
   const tpFinished = asMap(tpPbs);
   const proFinished = asMap(proPbs);
@@ -499,12 +506,13 @@ async function buildCompletionView({ guildId, targetId, tier, type, modeShort, p
     .setFooter({
       text:
         `${modeLabel(apiMode)} · 🟢 PRO = 0 teleports · 🔵 TP = teleports allowed` +
-        (totalPages > 1 ? ` · page ${safePage + 1}/${totalPages}` : ''),
+        (totalPages > 1 ? ` · page ${safePage + 1}/${totalPages}` : '') +
+        (fetchedAt ? ` · as of ${Math.max(0, Math.round((Date.now() - fetchedAt) / 60000))} min ago — 🔄 after a new PB` : ''),
     });
 
   const components = [];
+  const state = [showDone ? 'fin' : 'unf', tier, type, modeShort, targetId].join('|');
   if (totalPages > 1) {
-    const state = [showDone ? 'fin' : 'unf', tier, type, modeShort, targetId].join('|');
     components.push(
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -522,6 +530,21 @@ async function buildCompletionView({ guildId, targetId, tier, type, modeShort, p
           .setLabel('Next ▶')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage >= totalPages - 1),
+        new ButtonBuilder()
+          .setCustomId(`${state}|${safePage}|refresh`)
+          .setLabel('Refresh')
+          .setEmoji('🔄')
+          .setStyle(ButtonStyle.Secondary),
+      ),
+    );
+  } else {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${state}|0|refresh`)
+          .setLabel('Refresh')
+          .setEmoji('🔄')
+          .setStyle(ButtonStyle.Secondary),
       ),
     );
   }
@@ -572,7 +595,7 @@ export async function handleComponent(interaction) {
   const [kind, ...rest] = interaction.customId.split('|');
   if ((kind !== 'unf' && kind !== 'fin') || rest[0] === 'page') return;
 
-  const [tier, type, modeShort, targetId, page] = rest;
+  const [tier, type, modeShort, targetId, page, action] = rest;
   await interaction.deferUpdate();
 
   try {
@@ -584,6 +607,7 @@ export async function handleComponent(interaction) {
       modeShort,
       page: Number(page) || 0,
       showDone: kind === 'fin',
+      force: action === 'refresh', // 🔄 asks the API again instead of reusing the cached copy
     });
     if (view.error) return interaction.editReply({ content: view.error, embeds: [], components: [] });
     return interaction.editReply(view);

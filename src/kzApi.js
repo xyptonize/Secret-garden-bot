@@ -33,9 +33,9 @@ async function apiGet(path, params) {
 function cached(ttlMs) {
   const entries = new Map(); // key -> { at, value, promise }
 
-  return async function get(key, load) {
+  async function get(key, load, { force = false } = {}) {
     const hit = entries.get(key) || {};
-    if (hit.value !== undefined && Date.now() - hit.at < ttlMs) return hit.value;
+    if (!force && hit.value !== undefined && Date.now() - hit.at < ttlMs) return hit.value;
     if (hit.promise) return hit.promise;
 
     const promise = load()
@@ -58,12 +58,19 @@ function cached(ttlMs) {
 
     entries.set(key, { ...hit, promise });
     return promise;
-  };
+  }
+
+  /** When the cached copy was fetched, in ms — for an honest "as of" line. */
+  get.fetchedAt = (key) => entries.get(key)?.at ?? null;
+  return get;
 }
 
-// The approved map list changes rarely; personal bests only between runs.
+// The approved map list changes rarely, and personal bests only when someone
+// plays. The CS2KZ API takes 9-14s for a PB query, so a short TTL made every
+// page flip of /finished and /unfinished a fresh (often timing out) request.
 const mapsCache = cached(15 * 60 * 1000);
-const pbCache = cached(60 * 1000);
+const PB_TTL_MS = 15 * 60 * 1000;
+const pbCache = cached(PB_TTL_MS);
 
 /** Look up a single player. Returns the player object, or null if not found (404). */
 export async function getPlayer(steamId) {
@@ -86,10 +93,14 @@ export async function getRecords({ player, limit = 15 } = {}) {
  * hasTeleports === false -> only teleport-free (PRO) completions.
  * hasTeleports === undefined -> any completion (TP/overall).
  */
-export async function getPersonalBests({ player, mode, hasTeleports, limit = 1000 } = {}) {
-  return pbCache(`${player}|${mode}|${hasTeleports}|${limit}`, () =>
-    fetchPersonalBests({ player, mode, hasTeleports, limit }),
-  );
+export async function getPersonalBests({ player, mode, hasTeleports, limit = 1000, force = false } = {}) {
+  const key = `${player}|${mode}|${hasTeleports}|${limit}`;
+  return pbCache(key, () => fetchPersonalBests({ player, mode, hasTeleports, limit }), { force });
+}
+
+/** When this player's personal bests were last fetched (ms), or null. */
+export function personalBestsFetchedAt({ player, mode, hasTeleports, limit = 1000 } = {}) {
+  return pbCache.fetchedAt(`${player}|${mode}|${hasTeleports}|${limit}`);
 }
 
 async function fetchPersonalBests({ player, mode, hasTeleports, limit }) {
