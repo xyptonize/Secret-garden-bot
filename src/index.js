@@ -14,7 +14,7 @@ import {
   reconcileLobbies,
 } from './draft.js';
 import { contactCommands } from './contacts.js';
-import { profileCommands } from './profile.js';
+import { profileCommands, isProfileButton, isProfileModal, handleProfileButton, handleProfileModal } from './profile.js';
 import { startAnnouncer } from './announcer.js';
 import { startLeaderboardUpdater } from './leaderboard.js';
 
@@ -69,6 +69,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   // Buttons and menus: draft lobbies, and page buttons on paginated replies (e.g. /unfinished).
+  // Pop-up forms from the profile card.
+  if (interaction.isModalSubmit()) {
+    if (isProfileModal(interaction)) {
+      try {
+        await handleProfileModal(interaction);
+      } catch (err) {
+        console.error('Profile form failed:', err);
+      }
+    }
+    return;
+  }
+
+  if (interaction.isButton() && isProfileButton(interaction)) {
+    try {
+      await handleProfileButton(interaction);
+    } catch (err) {
+      console.error('Profile button failed:', err);
+    }
+    return;
+  }
+
   if (interaction.isButton() || interaction.isAnySelectMenu()) {
     try {
       if (isDraftButton(interaction)) await handleDraftButton(interaction);

@@ -60,6 +60,37 @@ function daysUntil(b, today) {
 }
 
 const formatDate = (b) => `${b.day} ${MONTHS[b.month - 1]}`;
+
+/**
+ * A date typed as free text -> { day, month, year|null }, or null.
+ * Accepts "14/3", "14.03.1999", "14-3-99", "14 March", "March 14" and "14 March 1999".
+ */
+export function parseBirthdayText(input) {
+  const text = String(input ?? '').trim().toLowerCase();
+  if (!text) return null;
+  let day = null;
+  let month = null;
+  let year = null;
+
+  const named = MONTHS.findIndex((m) => text.includes(m.toLowerCase().slice(0, 3)));
+  const numbers = text.match(/\d{1,4}/g)?.map(Number) ?? [];
+  if (named >= 0) {
+    month = named + 1;
+    day = numbers.find((n) => n >= 1 && n <= 31) ?? null;
+    year = numbers.find((n) => n >= 1900 && n <= new Date().getFullYear()) ?? null;
+  } else {
+    [day, month] = numbers;
+    year = numbers[2] ?? null;
+    if (year != null && year < 100) year += year > 30 ? 1900 : 2000; // "99" -> 1999
+  }
+  if (!day || !month || month < 1 || month > 12) return null;
+  if (year != null && (year < 1900 || year > new Date().getFullYear())) return null;
+  if (day > daysInMonth(month, year ?? 2000)) return null;
+  return { day, month, year: year ?? null };
+}
+
+/** "14 March 1999" for a saved birthday — shared with /sgprofile. */
+export const birthdayLabel = (b) => `${formatDate(b)}${b.year ? ` ${b.year}` : ''}`;
 const formatFull = (b) => `**${formatDate(b)}**${b.year ? ` ${b.year}` : ''}`;
 
 // ---------------------------------------------------------------------------

@@ -5,12 +5,23 @@
 // The reply is public, so a saved phone number is never printed — it only shows
 // as "saved (private)". Use /sgphone view for the number itself.
 
-import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import {
+  SlashCommandBuilder,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  MessageFlags,
+} from 'discord.js';
 import { config } from './config.js';
 import * as store from './store.js';
 import * as kz from './kzApi.js';
-import { savedContacts, steamLink } from './contacts.js';
+import { savedContacts, steamLink, parseInstagram, parsePhone, parseSteam, formatPhone } from './contacts.js';
 import { steamIdTo64 } from './steamid.js';
+import { parseBirthdayText, birthdayLabel } from './birthday.js';
 import { rankFor } from './ranks.js';
 import { formatNumber } from './format.js';
 import { globalStandingText } from './commands.js';
@@ -34,9 +45,66 @@ function birthdayText(b) {
   return `${date} ${b.year} · ${now.getFullYear() - b.year - (had ? 0 : 1)}`;
 }
 
-async function execute(interaction) {
-  const user = interaction.options.getUser('user') || interaction.user;
-  await interaction.deferReply();
+const PREFIX = 'sgp|'; // buttons on your own card
+const MODAL = 'sgpm|'; // the pop-up forms they open
+
+/** What each button saves, and how it reads what was typed. */
+const FIELDS = {
+  bday: {
+    emoji: '🎂',
+    label: 'Birthday',
+    hint: 'e.g. 14/03 or 14 March 1999',
+    parse: parseBirthdayText,
+    save: (guildId, id, v) => store.setBirthday(guildId, id, v),
+    show: (v) => birthdayLabel(v),
+  },
+  ig: {
+    emoji: '📸',
+    label: 'Instagram',
+    hint: 'e.g. secret.garden or an instagram.com link',
+    parse: parseInstagram,
+    save: (guildId, id, v) => store.setContact(guildId, 'ig', id, v),
+    show: (v) => `@${v}`,
+  },
+  steam: {
+    emoji: '🎮',
+    label: 'Steam',
+    hint: 'e.g. steamcommunity.com/id/yourname, or your SteamID',
+    parse: parseSteam,
+    save: (guildId, id, v) => store.setContact(guildId, 'steam', id, v),
+    show: (v) => steamLink(v),
+  },
+  phone: {
+    emoji: '📱',
+    label: 'Phone',
+    hint: 'e.g. 9911 2233 — only you and admins can see it',
+    parse: parsePhone,
+    save: (guildId, id, v) => store.setContact(guildId, 'phone', id, v),
+    show: (v) => formatPhone(v),
+  },
+};
+
+/** Buttons under your own card: one per thing you can fill in. */
+function fillButtons(guildId, userId) {
+  const saved = savedContacts(guildId, userId);
+  const has = { bday: store.getBirthdays(guildId)[userId], ig: saved.ig, steam: saved.steam, phone: saved.phone };
+  const kzSteam = store.findByDiscord(guildId, userId)?.steamId;
+  const row = new ActionRowBuilder();
+  for (const [kind, field] of Object.entries(FIELDS)) {
+    // Registered with /sgkz but no Steam profile saved: offer it in one click.
+    const oneClick = kind === 'steam' && !has.steam && kzSteam;
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${PREFIX}${oneClick ? 'usekz' : kind}|${userId}`)
+        .setEmoji(field.emoji)
+        .setLabel(oneClick ? 'Use my KZ Steam' : has[kind] ? `Change ${field.label.toLowerCase()}` : `Add ${field.label.toLowerCase()}`)
+        .setStyle(has[kind] ? ButtonStyle.Secondary : ButtonStyle.Primary),
+    );
+  }
+  return [row];
+}
+
+async function buildProfile(interaction, user) {
   const guildId = interaction.guildId;
 
   let member = null;
@@ -126,7 +194,83 @@ async function execute(interaction) {
   }
   if (draftLines.length) embed.addFields({ name: '🎮 Draft', value: draftLines.join('\n') });
 
-  return interaction.editReply({ embeds: [embed], allowedMentions: { parse: [] } });
+  const own = user.id === interaction.user.id;
+  return {
+    embeds: [embed],
+    components: own ? fillButtons(guildId, user.id) : [],
+    allowedMentions: { parse: [] },
+  };
+}
+
+async function execute(interaction) {
+  const user = interaction.options.getUser('user') || interaction.user;
+  await interaction.deferReply();
+  return interaction.editReply(await buildProfile(interaction, user));
+}
+
+export const isProfileButton = (interaction) => interaction.customId?.startsWith(PREFIX);
+export const isProfileModal = (interaction) => interaction.customId?.startsWith(MODAL);
+
+/** A button on someone's card: either the one-click Steam copy, or a form. */
+export async function handleProfileButton(interaction) {
+  const [kind, ownerId] = interaction.customId.slice(PREFIX.length).split('|');
+  if (ownerId !== interaction.user.id) {
+    return interaction.reply({
+      flags: MessageFlags.Ephemeral,
+      content: `That's someone else's profile — run \`/${config.profileRoot}\` to fill in your own.`,
+    });
+  }
+
+  if (kind === 'usekz') {
+    const steamId = store.findByDiscord(interaction.guildId, ownerId)?.steamId;
+    const id64 = steamId && steamIdTo64(steamId);
+    if (!id64) {
+      return interaction.reply({ flags: MessageFlags.Ephemeral, content: "You aren't registered with /sgkz." });
+    }
+    store.setContact(interaction.guildId, 'steam', ownerId, id64);
+    await interaction.deferUpdate();
+    await interaction.editReply(await buildProfile(interaction, interaction.user));
+    return interaction
+      .followUp({ flags: MessageFlags.Ephemeral, content: `🎮 Saved your Steam profile: ${steamLink(id64)}` })
+      .catch(() => {});
+  }
+
+  const field = FIELDS[kind];
+  if (!field) return undefined;
+  const modal = new ModalBuilder().setCustomId(`${MODAL}${kind}|${ownerId}`).setTitle(`${field.emoji} ${field.label}`);
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('value')
+        .setLabel(field.label)
+        .setPlaceholder(field.hint.slice(0, 100))
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(60),
+    ),
+  );
+  return interaction.showModal(modal);
+}
+
+/** The form came back: save it and refresh the card underneath. */
+export async function handleProfileModal(interaction) {
+  const [kind, ownerId] = interaction.customId.slice(MODAL.length).split('|');
+  const field = FIELDS[kind];
+  if (!field || ownerId !== interaction.user.id) return undefined;
+
+  const value = field.parse(interaction.fields.getTextInputValue('value'));
+  if (!value) {
+    return interaction.reply({
+      flags: MessageFlags.Ephemeral,
+      content: `❌ I couldn't read that ${field.label.toLowerCase()} — ${field.hint}.`,
+    });
+  }
+  field.save(interaction.guildId, ownerId, value);
+  await interaction.deferUpdate();
+  await interaction.editReply(await buildProfile(interaction, interaction.user)).catch(() => {});
+  return interaction
+    .followUp({ flags: MessageFlags.Ephemeral, content: `${field.emoji} Saved: ${field.show(value)}` })
+    .catch(() => {});
 }
 
 const data = new SlashCommandBuilder()
