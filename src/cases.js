@@ -68,6 +68,9 @@ const dayBefore = (iso) => {
 
 const profileOf = (guildId, userId) => store.getCardProfile(guildId, userId, DEFAULT_BACKGROUND);
 
+/** A read-only stand-in for someone who has never opened a case. */
+const blankProfile = () => ({ owned: { [DEFAULT_BACKGROUND]: 1 }, equipped: DEFAULT_BACKGROUND, seeds: 0, cases: 0, opened: 0, streak: 0 });
+
 /** A fair float in [0,1) — crypto, so nobody can argue about the odds. */
 const roll = () => randomInt(0, 1_000_000) / 1_000_000;
 
@@ -229,7 +232,7 @@ function revealButtons(userId, bgId, left) {
 
 /** The equip menu: everything they own, best first. */
 function equipRow(guildId, userId) {
-  const p = profileOf(guildId, userId);
+  const p = profileOf(guildId, userId); // own collection only — see inventoryView
   const owned = BACKGROUNDS.filter((b) => p.owned[b.id])
     .sort((a, b) => rarityRank(b.rarity) - rarityRank(a.rarity) || a.name.localeCompare(b.name))
     .slice(0, 25);
@@ -249,8 +252,11 @@ function equipRow(guildId, userId) {
   return [new ActionRowBuilder().addComponents(menu)];
 }
 
-function inventoryView(guildId, user) {
-  const p = profileOf(guildId, user.id);
+async function inventoryView(guildId, user, { own = true } = {}) {
+  // Looking someone up must not create a collection for them: that would put a
+  // row in the store (and a 🎒 Cards line on their /sgprofile) for a member who
+  // has never touched the feature.
+  const p = own ? profileOf(guildId, user.id) : store.getCardProfiles(guildId)[user.id] || blankProfile();
   const { per, have, total } = progress(p.owned);
   const equipped = backgroundById(p.equipped) || backgroundById(DEFAULT_BACKGROUND);
   const claimed = p.lastDaily === today();
@@ -258,7 +264,7 @@ function inventoryView(guildId, user) {
   // Drawn first: if it fails, the inventory still answers, just without a picture.
   let sheet = null;
   try {
-    sheet = file(renderCollection(p.owned), 'collection.png');
+    sheet = file(await renderCollection(p.owned), 'collection.png');
   } catch (err) {
     console.error(`Collection sheet failed: ${err.message}`);
   }
@@ -283,8 +289,10 @@ function inventoryView(guildId, user) {
     .setFooter({ text: `Streak ${p.streak || 0} day(s) · a case costs ${config.casePrice} ${SEED}` });
   if (sheet) embed.setImage('attachment://collection.png');
 
-  const rows = equipRow(guildId, user.id);
-  if ((p.cases || 0) > 0 || !claimed) {
+  // Buttons and the equip menu only exist on your own collection — and building
+  // them is itself a write, so they are skipped entirely for a lookup.
+  const rows = own ? equipRow(guildId, user.id) : [];
+  if (own && ((p.cases || 0) > 0 || !claimed)) {
     const row = new ActionRowBuilder();
     if (!claimed) {
       row.addComponents(
@@ -317,12 +325,18 @@ function spinStrip(exclude) {
  * Open one case and animate the reveal over an already-deferred reply. A Covert
  * or better pull is also posted to the channel, CS2-style.
  */
-async function revealOpen(interaction, userId) {
+async function revealOpen(interaction, userId, { updated = false } = {}) {
   const busy = `${interaction.guildId}|${userId}`;
   if (opening.has(busy)) {
-    return interaction
-      .followUp({ flags: MessageFlags.Ephemeral, content: '⏳ Still opening that one — give it a second.' })
-      .catch(() => {});
+    const wait = '⏳ Still opening that one — give it a second.';
+    // `updated` means the press was acknowledged by editing the message it sat
+    // on, so there is no pending reply to complete and a follow-up is the only
+    // way to answer. Otherwise a deferred reply IS pending, and answering with
+    // a follow-up would leave it spinning on "thinking…" for good.
+    return (updated
+      ? interaction.followUp({ flags: MessageFlags.Ephemeral, content: wait })
+      : interaction.editReply({ content: wait, embeds: [], components: [], files: [], attachments: [] })
+    ).catch(() => {});
   }
   opening.add(busy);
   try {
@@ -367,7 +381,7 @@ async function unbox(interaction, userId) {
     .catch(() => {});
   await sleep(config.caseRevealMs);
 
-  const image = renderBackground(result.bg.id);
+  const image = await renderBackground(result.bg.id);
   await interaction
     .editReply({
       embeds: [revealEmbed(result)],
@@ -445,9 +459,10 @@ async function cmdOpen(interaction) {
 async function cmdInventory(interaction) {
   const user = interaction.options.getUser('user') || interaction.user;
   await interaction.deferReply({ flags: user.id === interaction.user.id ? MessageFlags.Ephemeral : undefined });
-  const view = inventoryView(interaction.guildId, user);
+  const own = user.id === interaction.user.id;
+  const view = await inventoryView(interaction.guildId, user, { own });
   // Someone else's collection is read-only: no buttons that would act as them.
-  if (user.id !== interaction.user.id) view.components = [];
+  if (!own) view.components = [];
   return interaction.editReply(view);
 }
 
@@ -515,6 +530,7 @@ async function cmdPreview(interaction) {
   const p = profileOf(interaction.guildId, interaction.user.id);
   const rarity = rarityOf(bg.rarity);
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const preview = await renderBackground(bg.id, { title: false });
   return interaction.editReply({
     embeds: [
       new EmbedBuilder()
@@ -527,7 +543,7 @@ async function cmdPreview(interaction) {
         )
         .setImage(`attachment://${bg.id}.png`),
     ],
-    files: [file(renderBackground(bg.id, { title: false }), `${bg.id}.png`)],
+    files: [file(preview, `${bg.id}.png`)],
     components: p.owned[bg.id]
       ? [
           new ActionRowBuilder().addComponents(
@@ -605,7 +621,7 @@ export async function handleCaseComponent(interaction) {
     // user's own ephemeral message; otherwise it answers fresh.
     if (interaction.message?.flags?.has(MessageFlags.Ephemeral)) {
       await interaction.deferUpdate();
-      return revealOpen(interaction, ownerId);
+      return revealOpen(interaction, ownerId, { updated: true });
     }
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     return revealOpen(interaction, ownerId);
@@ -617,7 +633,7 @@ export async function handleCaseComponent(interaction) {
 
   if (action === 'inv') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    return interaction.editReply(inventoryView(interaction.guildId, interaction.user));
+    return interaction.editReply(await inventoryView(interaction.guildId, interaction.user));
   }
 
   if (action === 'equip' || action === 'wear') {

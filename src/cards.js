@@ -18,13 +18,28 @@ const FONT = (size, weight = '') => `${weight} ${size}px ${BASE}${EMOJI}`.trim()
 
 const hexOf = (n) => `#${n.toString(16).padStart(6, '0')}`;
 
+// How big one design is drawn on the collection sheet.
+const THUMB_W = 228;
+const THUMB_H = 76;
+
+// Display names are full of emoji and non-Latin scripts, and a plain .slice()
+// cuts UTF-16 code units — half an emoji renders as a tofu box. Split into whole
+// characters (grapheme clusters where the runtime can, code points otherwise).
+const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+export const characters = (text) =>
+  segmenter ? [...segmenter.segment(text)].map((s) => s.segment) : [...text];
+
 /** Fit `text` into `max` px, cutting with an ellipsis when it doesn't. */
 function ellipsize(ctx, text, max) {
   if (ctx.measureText(text).width <= max) return text;
-  let cut = text;
-  while (cut.length > 1 && ctx.measureText(`${cut}…`).width > max) cut = cut.slice(0, -1);
-  return `${cut}…`;
+  const chars = characters(text);
+  let cut = chars;
+  while (cut.length > 1 && ctx.measureText(`${cut.join('')}…`).width > max) cut = cut.slice(0, -1);
+  return `${cut.join('')}…`;
 }
+
+/** The first whole character of a name, for the avatar fallback. */
+const initialOf = (name) => characters(String(name ?? '').trim())[0]?.toUpperCase() || '?';
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -126,7 +141,7 @@ export async function renderCard({ background, name, subtitle, avatarUrl, stats 
     cx: 112,
     cy: 112,
     r: 66,
-    initial: (name || '?').trim().charAt(0).toUpperCase() || '?',
+    initial: initialOf(name),
     ring: accent,
   });
 
@@ -173,11 +188,23 @@ export async function renderCard({ background, name, subtitle, avatarUrl, stats 
   ctx.fillText(tag || `${bg.name} · ${rarity.name}`, CARD_W - 20, 192);
   ctx.restore();
 
-  return canvas.toBuffer('image/png');
+  // encode() runs the PNG compression on a worker thread. toBuffer() would do it
+  // here, and ~100ms of that per card blocks every other interaction the bot is
+  // trying to answer — including the 3-second acknowledgement deadline.
+  return canvas.encode('png');
 }
 
+// The artwork never changes for a given id, so the encoded PNG is kept: an
+// unboxing reveal and a preview of the same background cost nothing after the
+// first. 22 designs, so this is bounded.
+const encoded = new Map();
+
 /** Just the artwork, titled — for unboxing reveals and previews. */
-export function renderBackground(id, { title = true } = {}) {
+export async function renderBackground(id, { title = true } = {}) {
+  const bg0 = backgroundById(id) || BACKGROUNDS[0];
+  const key = `${bg0.id}|${title}`;
+  const hit = encoded.get(key);
+  if (hit) return hit;
   const bg = backgroundById(id) || BACKGROUNDS[0];
   const rarity = rarityOf(bg.rarity);
   const accent = hexOf(rarity.color);
@@ -207,17 +234,35 @@ export function renderBackground(id, { title = true } = {}) {
   ctx.lineWidth = 6;
   ctx.strokeRect(3, 3, CARD_W - 6, CARD_H - 6);
   ctx.restore();
-  return canvas.toBuffer('image/png');
+
+  const png = await canvas.encode('png');
+  encoded.set(key, png);
+  return png;
+}
+
+// A design's thumbnail is the same for every member and every sheet, so each is
+// drawn once and reused. Re-drawing all 22 at full size and scaling them down
+// was most of the cost of showing an inventory.
+const thumbnails = new Map();
+function thumbnail(bg) {
+  const hit = thumbnails.get(bg.id);
+  if (hit) return hit;
+  const full = createCanvas(CARD_W, CARD_H);
+  bg.draw(full.getContext('2d'));
+  const small = createCanvas(THUMB_W, THUMB_H);
+  small.getContext('2d').drawImage(full, 0, 0, THUMB_W, THUMB_H);
+  thumbnails.set(bg.id, small);
+  return small;
 }
 
 /**
  * The whole collection as one sheet: owned in colour, missing dimmed — like a
  * CS2 case listing, where you can see everything you haven't pulled yet.
  */
-export function renderCollection(owned = {}) {
+export async function renderCollection(owned = {}) {
   const COLS = 4;
-  const TW = 228;
-  const TH = 76;
+  const TW = THUMB_W;
+  const TH = THUMB_H;
   const PAD = 12;
   const LABEL = 22;
   const rows = Math.ceil(BACKGROUNDS.length / COLS);
@@ -230,12 +275,10 @@ export function renderCollection(owned = {}) {
     const x = PAD + (i % COLS) * (TW + PAD);
     const y = PAD + Math.floor(i / COLS) * (TH + LABEL + PAD);
     const count = owned[bg.id] || 0;
-    const tile = createCanvas(CARD_W, CARD_H);
-    bg.draw(tile.getContext('2d'));
 
     ctx.save();
     if (!count) ctx.globalAlpha = 0.25;
-    ctx.drawImage(tile, x, y, TW, TH);
+    ctx.drawImage(thumbnail(bg), x, y, TW, TH);
     ctx.restore();
 
     const rarity = rarityOf(bg.rarity);
@@ -256,5 +299,5 @@ export function renderCollection(owned = {}) {
       ctx.fillText(`×${count}`, x + TW, y + TH + LABEL - 3);
     }
   });
-  return canvas.toBuffer('image/png');
+  return canvas.encode('png');
 }

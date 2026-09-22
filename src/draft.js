@@ -1333,6 +1333,7 @@ async function handleLobbyAction(interaction) {
       }
       const mode = ['aura', 'seed', 'random'].includes(arg) ? arg : 'random';
       lobby.bracket = createBracket(lobby.result.teams.map(teamTotal), mode);
+      delete lobby.casesPaid; // a new tournament pays its champions again
       if (!lobby.test) startRecord(guildId, lobby, lobbyId);
       saveAll();
       // From the private menu: answer it, then redraw the lobby message.
@@ -1378,6 +1379,7 @@ async function handleLobbyAction(interaction) {
       const order = [...lobby.pairing.pairs.flat(), ...byes];
       delete lobby.pairing;
       lobby.bracket = createBracket(lobby.result.teams.map(teamTotal), 'manual', Math.random, order);
+      delete lobby.casesPaid; // a new tournament pays its champions again
       if (!lobby.test) startRecord(guildId, lobby, lobbyId);
       saveAll();
       await interaction.update({ content: '✅ Bracket started with your matchups.', components: [] });
@@ -1407,8 +1409,9 @@ async function handleLobbyAction(interaction) {
       const champs = winner != null ? lobby.result.teams[winner] : [];
       const ids = champs.filter((p) => !p.mock).map((p) => p.id);
       // Champions earn profile-card cases — never from a test lobby, and never
-      // twice for the same player: a final can be undone and re-marked as often
-      // as the host likes, which would otherwise print cases on demand.
+      // twice for the same player *in this tournament*: a final can be undone
+      // and re-marked as often as the host likes, which would otherwise print
+      // cases on demand. Starting another bracket clears the list.
       const paid = new Set(lobby.casesPaid || []);
       const owed = winner != null && !lobby.test ? ids.filter((id) => !paid.has(id)) : [];
       const cases = owed.length ? awardChampions(guildId, owed) : 0;
