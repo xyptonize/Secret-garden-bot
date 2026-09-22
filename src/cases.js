@@ -120,14 +120,6 @@ function openCase(guildId, userId) {
   return { bg, rarity, duplicate, seeds, left: p.cases, equipped };
 }
 
-/** Hand out cases (drops, admin grants, purchases). */
-export function grantCases(guildId, userId, count = 1) {
-  const p = profileOf(guildId, userId);
-  p.cases = (p.cases || 0) + count;
-  store.persist();
-  return p.cases;
-}
-
 /**
  * A drop for playing: a chance at a case per announced KZ record, capped per
  * day so a long session can't print them. Returns true when one dropped.
@@ -310,8 +302,8 @@ function spinStrip(exclude) {
 }
 
 /**
- * Open one case and animate the reveal over an already-deferred reply.
- * `announce` is the channel to brag in for a rare pull (may be null).
+ * Open one case and animate the reveal over an already-deferred reply. A Covert
+ * or better pull is also posted to the channel, CS2-style.
  */
 async function revealOpen(interaction, userId) {
   const result = openCase(interaction.guildId, userId);

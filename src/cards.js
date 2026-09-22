@@ -211,8 +211,8 @@ export function renderBackground(id, { title = true } = {}) {
 }
 
 /**
- * The whole collection as one sheet: owned in colour, missing dimmed and
- * unnamed, so there's something left to chase.
+ * The whole collection as one sheet: owned in colour, missing dimmed — like a
+ * CS2 case listing, where you can see everything you haven't pulled yet.
  */
 export function renderCollection(owned = {}) {
   const COLS = 4;
@@ -239,13 +239,16 @@ export function renderCollection(owned = {}) {
     ctx.restore();
 
     const rarity = rarityOf(bg.rarity);
-    ctx.fillStyle = count ? hexOf(rarity.color) : 'rgba(255, 255, 255, 0.22)';
+    ctx.save();
+    ctx.globalAlpha = count ? 1 : 0.3; // the tier is still readable when locked
+    ctx.fillStyle = hexOf(rarity.color);
     ctx.fillRect(x, y + TH, TW, 3);
+    ctx.restore();
 
     ctx.textAlign = 'left';
-    ctx.fillStyle = count ? '#e9e9ee' : 'rgba(233, 233, 238, 0.35)';
+    ctx.fillStyle = count ? '#e9e9ee' : 'rgba(233, 233, 238, 0.38)';
     ctx.font = FONT(13, count ? 'bold' : '');
-    ctx.fillText(ellipsize(ctx, count ? bg.name : '???', TW - 34), x + 2, y + TH + LABEL - 3);
+    ctx.fillText(ellipsize(ctx, `${count ? '' : '🔒 '}${bg.name}`, TW - 34), x + 2, y + TH + LABEL - 3);
     if (count > 1) {
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(233, 233, 238, 0.6)';

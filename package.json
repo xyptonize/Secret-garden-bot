@@ -1,7 +1,7 @@
 {
   "name": "sg-bot",
   "version": "1.0.0",
-  "description": "SG-BOT — Secret Garden Discord bot: CS2KZ tracking (/sgkz) and birthday reminders (/sghb).",
+  "description": "SG-BOT \u2014 the Secret Garden Discord bot: CS2KZ tracking (/sgkz), team drafter (/sgdraft), birthdays (/sghb), contacts, profiles (/sgprofile) and card cases (/sgcase).",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
