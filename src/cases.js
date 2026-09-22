@@ -542,9 +542,24 @@ async function cmdPreview(interaction) {
   });
 }
 
+/**
+ * Who may hand out cases and seeds. CASE_ADMIN_ID names one member and means
+ * exactly that member — an admin with Manage Server does not inherit it.
+ */
+function canDistribute(interaction) {
+  if (config.caseAdminId) return interaction.user.id === config.caseAdminId;
+  return Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild));
+}
+
 async function cmdGive(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    return interaction.reply({ flags: MessageFlags.Ephemeral, content: '🔒 Only admins (Manage Server) can hand out cases.' });
+  if (!canDistribute(interaction)) {
+    return interaction.reply({
+      flags: MessageFlags.Ephemeral,
+      content: config.caseAdminId
+        ? `🔒 Only <@${config.caseAdminId}> can hand out cases and seeds.`
+        : '🔒 Only admins (Manage Server) can hand out cases.',
+      allowedMentions: { parse: [] },
+    });
   }
   const user = interaction.options.getUser('user', true);
   const cases = interaction.options.getInteger('cases') ?? 0;
@@ -684,7 +699,7 @@ const data = new SlashCommandBuilder()
   .addSubcommand((s) =>
     s
       .setName('give')
-      .setDescription('Admin: hand out cases or seeds')
+      .setDescription('Hand out cases or seeds (restricted)')
       .addUserOption((o) => o.setName('user').setDescription('Who').setRequired(true))
       .addIntegerOption((o) => o.setName('cases').setDescription('Cases (negative takes them away)').setMinValue(-100).setMaxValue(100))
       .addIntegerOption((o) => o.setName('seeds').setDescription('Seeds (negative takes them away)').setMinValue(-100000).setMaxValue(100000)),

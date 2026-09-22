@@ -59,6 +59,9 @@ export const config = {
   caseDropDailyCap: Math.max(0, numberOr(process.env.CASE_DROP_DAILY_CAP, 3)), // playing drops per member per day
   caseChampionCases: Math.max(0, numberOr(process.env.CASE_CHAMPION_CASES, 1)), // to each player on the winning team
   caseRevealMs: Math.max(0, numberOr(process.env.CASE_REVEAL_MS, 900)), // pause between unboxing frames
+  // Who may hand out cases and seeds. When set, ONLY this member can — not even
+  // other admins. Unset falls back to anyone with Manage Server.
+  caseAdminId: process.env.CASE_ADMIN_ID?.trim() || null,
   // The day boundary for daily claims and drop caps — the server's own day.
   caseTimeZone: process.env.CASE_TIMEZONE?.trim() || process.env.BIRTHDAY_TIMEZONE?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone,
 };

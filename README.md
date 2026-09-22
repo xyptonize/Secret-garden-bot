@@ -184,6 +184,7 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `CASE_DROP_DAILY_CAP` | — | `3` | Most play-drops one member can get in a day. |
 | `CASE_CHAMPION_CASES` | — | `1` | Cases for each player on a winning draft team. |
 | `CASE_REVEAL_MS` | — | `900` | Pause between unboxing animation frames. |
+| `CASE_ADMIN_ID` | — | — | Discord user ID of the **only** member who may `/sgcase give`. Unset = anyone with Manage Server. |
 | `CASE_TIMEZONE` | — | `BIRTHDAY_TIMEZONE` | Timezone deciding when "today" rolls over for daily claims. |
 | `CS2KZ_API_BASE` | — | `https://api.cs2kz.org` | API base URL. |
 
@@ -316,7 +317,7 @@ All 22 designs are drawn by the bot itself (`src/cardArt.js`) — there are no i
 | `/sgcase preview <background>` | anyone | Look at any background (owned ones are suggested first). |
 | `/sgcase buy [cases]` | anyone | Buy cases with seeds. |
 | `/sgcase odds` | anyone | The drop table and where cases come from. |
-| `/sgcase give <user> [cases] [seeds]` | Manage Server | Hand out (or take back) cases and seeds. |
+| `/sgcase give <user> [cases] [seeds]` | `CASE_ADMIN_ID` only | Hand out (or take back) cases and seeds. With no `CASE_ADMIN_ID` set, anyone with Manage Server can. |
 
 A new background is equipped automatically when it's rarer than what you're wearing; otherwise pick one from `/sgcase inventory`. The case is spent and the result saved **before** the reveal is animated, so a Discord hiccup can never cost someone a pull.
 
