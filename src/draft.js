@@ -33,6 +33,7 @@ import {
 } from 'discord.js';
 import { config } from './config.js';
 import { awardChampions } from './cases.js';
+import { settleMatch, refundLobby } from './betting.js';
 import * as store from './store.js';
 import {
   draft,
@@ -577,6 +578,9 @@ function resetTeams(lobby) {
   // Safety net: a bracket must never vanish with its record left open.
   const open = lobby.historyId != null && lobby.guildId;
   if (open) endRecord(lobby.guildId, lobby);
+  // Teams are about to be redrawn, so a bet on "Team 2" no longer means what it
+  // did when it was placed. Every open stake goes back.
+  refundLobby(lobby);
   lobby.result = null;
   lobby.bracket = null;
   lobby.edited = false;
@@ -851,6 +855,7 @@ function dropLobby(key, guildId) {
   const lobby = store.getDraftLobbies()[key];
   if (!lobby) return;
   ensureRecord(lobby, key, guildId); // so results already played are kept
+  refundLobby(lobby); // open bets are never lost with the lobby
   lobby.closed = true;
   if (lobby.historyId != null && lobby.guildId) endRecord(lobby.guildId, lobby);
   delete store.getDraftLobbies()[key];
@@ -1138,14 +1143,19 @@ async function handleLobbyAction(interaction) {
     case 'closekeep':
       return interaction.update({ content: '👍 Kept open.', components: [] });
 
-    case 'closeok':
+    case 'closeok': {
       if (lobby.historyId != null) endRecord(guildId, lobby);
+      const returned = refundLobby(lobby);
       lobby.closed = true;
       delete store.getDraftLobbies()[lobbyId];
       saveAll();
-      await interaction.update({ content: `✅ Closed **${lobby.title}**.`, components: [] });
+      await interaction.update({
+        content: `✅ Closed **${lobby.title}**.${returned ? ` ${returned.toLocaleString('en-US')} 🌱 in open bets refunded.` : ''}`,
+        components: [],
+      });
       await refreshLobbyMessage(interaction.channel, lobby).catch(() => {});
       return undefined;
+    }
 
     case 'teams': {
       const value = interaction.values[0];
@@ -1403,6 +1413,9 @@ async function handleLobbyAction(interaction) {
         };
       }
       syncRecord(guildId, lobby);
+      // Whoever backed this team gets paid before anything is posted, so the
+      // payout can never be lost to a failed message.
+      const betLine = settleMatch(lobby, r, m, t);
       saveAll();
       // Read everything first: a "Cancel bracket" can land during the await below.
       const winner = champion(lobby.bracket);
@@ -1425,6 +1438,9 @@ async function handleLobbyAction(interaction) {
       // would leave nothing to build it from.
       const recap = winner != null ? recapEmbed(lobby, guildId, winner) : null;
       await interaction.update(view(lobby));
+      if (betLine) {
+        await interaction.followUp({ content: betLine, allowedMentions: { parse: [] } }).catch(() => {});
+      }
       if (winner != null) {
         await interaction
           .followUp({
@@ -1477,12 +1493,20 @@ async function handleLobbyAction(interaction) {
       saveAll();
       return interaction.update(view(lobby));
 
-    case 'unbracket':
+    case 'unbracket': {
       if (!lobby.bracket) return ephemeral(interaction, 'No bracket running.');
       endRecord(guildId, lobby);
       lobby.bracket = null;
+      const returned = refundLobby(lobby); // nobody's stake dies with the bracket
       saveAll();
-      return interaction.update(view(lobby));
+      await interaction.update(view(lobby));
+      if (returned) {
+        await interaction
+          .followUp({ content: `💰 Bracket cancelled — ${returned.toLocaleString('en-US')} 🌱 in open bets refunded.` })
+          .catch(() => {});
+      }
+      return undefined;
+    }
 
     default:
       return undefined;

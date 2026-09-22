@@ -160,6 +160,26 @@ export function awardChampions(guildId, userIds) {
   return each;
 }
 
+// --- the seed wallet, shared with the casino -------------------------------
+
+/** A member's seed account. Creates their collection row on first use. */
+export const wallet = (guildId, userId) => profileOf(guildId, userId);
+
+/** What they hold right now, without creating anything. */
+export const seedsOf = (guildId, userId) => store.getCardProfiles(guildId)[userId]?.seeds || 0;
+
+/**
+ * Move seeds. Negative takes them. Never goes below zero, and the caller is
+ * expected to have checked the balance first — this is the last line, not the
+ * only one.
+ */
+export function moveSeeds(guildId, userId, delta) {
+  const p = profileOf(guildId, userId);
+  p.seeds = Math.max(0, (p.seeds || 0) + delta);
+  store.persist();
+  return p.seeds;
+}
+
 /** The background a member's card should use (no write, so viewing costs nothing). */
 export function equippedBackground(guildId, userId) {
   const p = store.getCardProfiles(guildId)[userId];

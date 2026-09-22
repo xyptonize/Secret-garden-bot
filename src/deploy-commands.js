@@ -8,6 +8,7 @@ import { draftCommandData } from './draft.js';
 import { contactCommandData } from './contacts.js';
 import { profileCommandData } from './profile.js';
 import { caseCommandData } from './cases.js';
+import { casinoCommandData } from './casino.js';
 
 const body = [
   ...commandData(),
@@ -16,6 +17,7 @@ const body = [
   ...contactCommandData(),
   ...profileCommandData(),
   ...caseCommandData(),
+  ...casinoCommandData(),
 ];
 const rest = new REST({ version: '10' }).setToken(config.token);
 

@@ -15,14 +15,24 @@ import {
 } from './draft.js';
 import { contactCommands } from './contacts.js';
 import { caseCommands, isCaseComponent, handleCaseComponent, handleCaseAutocomplete } from './cases.js';
+import {
+  casinoCommands,
+  isCasinoComponent,
+  handleCasinoComponent,
+  handleCasinoAutocomplete,
+  refundInterruptedGames,
+} from './casino.js';
 import { profileCommands, isProfileButton, isProfileModal, handleProfileButton, handleProfileModal } from './profile.js';
 import { startAnnouncer } from './announcer.js';
 import { startLeaderboardUpdater } from './leaderboard.js';
 
 store.load();
+// A mines or blackjack game interrupted by a restart has already paid its
+// stake: give it back rather than swallow it.
+refundInterruptedGames();
 
 // One router for every sg*** command root (/sgkz, /sghb, …).
-const commands = { ...kzCommands, ...birthdayCommands, ...draftCommands, ...contactCommands, ...profileCommands, ...caseCommands };
+const commands = { ...kzCommands, ...birthdayCommands, ...draftCommands, ...contactCommands, ...profileCommands, ...caseCommands, ...casinoCommands };
 
 // GuildMessages (not privileged) + partial messages: /sgdraft needs to hear
 // about new messages (to keep lobbies at the bottom) and deleted ones. Message
@@ -63,6 +73,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isAutocomplete()) {
     try {
       if (interaction.commandName === config.caseRoot) await handleCaseAutocomplete(interaction);
+      else if (interaction.commandName === config.casinoRoot) await handleCasinoAutocomplete(interaction);
       else await handleAutocomplete(interaction);
     } catch (err) {
       console.error('Autocomplete failed:', err.message);
@@ -95,6 +106,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isButton() || interaction.isAnySelectMenu()) {
     try {
       if (isCaseComponent(interaction)) await handleCaseComponent(interaction);
+      else if (isCasinoComponent(interaction)) await handleCasinoComponent(interaction);
       else if (isDraftButton(interaction)) await handleDraftButton(interaction);
       else await handleComponent(interaction);
     } catch (err) {

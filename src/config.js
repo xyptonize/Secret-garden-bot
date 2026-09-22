@@ -62,6 +62,15 @@ export const config = {
   // Who may hand out cases and seeds. When set, ONLY this member can — not even
   // other admins. Unset falls back to anyone with Manage Server.
   caseAdminId: process.env.CASE_ADMIN_ID?.trim() || null,
+  // Casino — seeds are wagered at true odds, so the house takes nothing and the
+  // seed pool neither grows nor shrinks in the long run. Limits are the only
+  // brake, and they protect members from themselves.
+  casinoRoot: rootName(process.env.CASINO_COMMAND_ROOT, 'sgcasino'),
+  casinoMinBet: Math.max(1, numberOr(process.env.CASINO_MIN_BET, 10)),
+  casinoMaxBet: Math.max(1, numberOr(process.env.CASINO_MAX_BET, 5000)),
+  casinoDailyLossCap: Math.max(0, numberOr(process.env.CASINO_DAILY_LOSS_CAP, 20000)), // 0 = no cap
+  casinoDuelMinutes: Math.max(1, numberOr(process.env.CASINO_DUEL_MINUTES, 5)), // a challenge expires after this
+  casinoSpinMs: Math.max(0, numberOr(process.env.CASINO_SPIN_MS, 800)), // pause before a slots result
   // The day boundary for daily claims and drop caps — the server's own day.
   caseTimeZone: process.env.CASE_TIMEZONE?.trim() || process.env.BIRTHDAY_TIMEZONE?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone,
 };

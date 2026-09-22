@@ -10,6 +10,7 @@ The Secret Garden Discord bot. Each feature has its own `sg***` command root:
 | `/sgig` `/sgphone` `/sgsteam` | Saved contacts — Instagram, phone (admins only), Steam |
 | `/sgprofile` | One card per member: stats, socials, KZ and draft record |
 | `/sgcase` | Profile-card backgrounds, unboxed like CS2 skins |
+| `/sgcasino` | Wager seeds — fair-odds games, duels and draft-match betting |
 
 ## CS2KZ (`/sgkz`)
 
@@ -186,6 +187,11 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `CASE_REVEAL_MS` | — | `900` | Pause between unboxing animation frames. |
 | `CASE_ADMIN_ID` | — | — | Discord user ID of the **only** member who may `/sgcase give`. Unset = anyone with Manage Server. |
 | `CASE_TIMEZONE` | — | `BIRTHDAY_TIMEZONE` | Timezone deciding when "today" rolls over for daily claims. |
+| `CASINO_COMMAND_ROOT` | — | `sgcasino` | Parent command for the casino. |
+| `CASINO_MIN_BET` / `CASINO_MAX_BET` | — | `10` / `5000` | Smallest and largest stake, in seeds. |
+| `CASINO_DAILY_LOSS_CAP` | — | `20000` | Once a member has lost this much in a day the bot stops taking their bets (0 = no cap). |
+| `CASINO_DUEL_MINUTES` | — | `5` | How long a duel challenge stands before it expires. |
+| `CASINO_SPIN_MS` | — | `800` | Pause before the slots result. |
 | `CS2KZ_API_BASE` | — | `https://api.cs2kz.org` | API base URL. |
 
 ## Birthday reminders (`/sghb`)
@@ -320,6 +326,26 @@ All 22 designs are drawn by the bot itself (`src/cardArt.js`) — there are no i
 | `/sgcase give <user> [cases] [seeds]` | `CASE_ADMIN_ID` only | Hand out (or take back) cases and seeds. With no `CASE_ADMIN_ID` set, anyone with Manage Server can. |
 
 A new background is equipped automatically when it's rarer than what you're wearing; otherwise pick one from `/sgcase inventory`. The case is spent and the result saved **before** the reveal is animated, so a Discord hiccup can never cost someone a pull.
+
+## Casino (`/sgcasino`)
+
+Seeds earned from `/sgcase` can be wagered. **The house takes nothing** — every payout is the exact inverse of its chance, so a bet returns exactly its stake on average and seeds only move between members. This is verified by test, not just by intent: 400,000 simulated bets per game land within noise of break-even.
+
+| Game | How it pays |
+|---|---|
+| 🪙 `flip` | Call heads or tails — 50% to double. **2×** |
+| 🎲 `dice` | Roll 1–100, call over or under a line. **100 ÷ winning numbers** (over 60 → 2.50×) |
+| 🎰 `slots` | 7 symbols on 3 reels. Pair **2×** (36.7%), any triple **11×** (1.7%), 🟡🟡🟡 **25×** (0.29%) — expected return exactly 1.00 |
+| 💣 `mines` | 20 tiles, 1–10 bombs. Each safe tile raises the multiplier; cash out whenever. Clearing the board with one bomb pays **20×** |
+| 🃏 `blackjack` | Dealer draws to 17, blackjack pays 3:2. The only game with an inherent edge (~0.5%) — the rules give it, not the bot |
+| ⚔️ `duel <user>` | Challenge a member; both stake, one flip, winner takes the pot |
+| 🏆 `bet` | Back a team in a running `/sgdraft` match |
+
+**Match betting is pari-mutuel:** every seed staked on a match goes into one pot, and when the host marks the winner the pot is split among whoever backed that team, in proportion to their stake. The bot keeps nothing, and the rounding remainder goes to the largest backer so not one seed is created or destroyed. Stakes are refunded in full if the bracket is cancelled, the teams are redrawn, or the lobby is closed. **Nobody playing in a match may bet on it — either way**, so no one can be paid to lose.
+
+Limits: stakes run from `CASINO_MIN_BET` to `CASINO_MAX_BET`, and once a member has lost `CASINO_DAILY_LOSS_CAP` in a day the bot stops taking their bets until tomorrow. `/sgcasino stats` shows a member's record; `/sgcasino odds` shows every payout and the chance behind it.
+
+Games that span several presses (mines, blackjack) keep their state in `data/store.json`, and any game still running when the bot restarts has its stake **refunded** on startup rather than swallowed.
 
 ## Backups and service
 
