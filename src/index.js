@@ -1,7 +1,8 @@
 import { Client, GatewayIntentBits, Events, MessageFlags, Partials } from 'discord.js';
 import { config } from './config.js';
+import * as kzApi from './kzApi.js';
 import * as store from './store.js';
-import { commands as kzCommands, handleComponent } from './commands.js';
+import { commands as kzCommands, handleComponent, handleAutocomplete } from './commands.js';
 import { birthdayCommands, startBirthdayScheduler } from './birthday.js';
 import {
   draftCommands,
@@ -52,9 +53,21 @@ client.once(Events.ClientReady, (c) => {
   startLeaderboardUpdater(client);
   startBirthdayScheduler(client);
   reconcileLobbies(client).catch((err) => console.error('Draft lobby reconcile failed:', err.message));
+  // Warm the map list so the first autocomplete after a restart is instant.
+  kzApi.getAllMaps().catch((err) => console.error('Could not pre-load the map list:', err.message));
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Map/course suggestions while typing — must answer within 3 seconds.
+  if (interaction.isAutocomplete()) {
+    try {
+      await handleAutocomplete(interaction);
+    } catch (err) {
+      console.error('Autocomplete failed:', err.message);
+    }
+    return;
+  }
+
   // Buttons and menus: draft lobbies, and page buttons on paginated replies (e.g. /unfinished).
   if (interaction.isButton() || interaction.isAnySelectMenu()) {
     try {

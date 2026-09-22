@@ -72,6 +72,27 @@ const mapsCache = cached(15 * 60 * 1000);
 const PB_TTL_MS = 15 * 60 * 1000;
 const pbCache = cached(PB_TTL_MS);
 
+// The global top by CKZ rating, for "where do I stand among everyone".
+const topCache = cached(10 * 60 * 1000);
+
+/** The highest-rated players, best first, plus how many players exist in total. */
+export async function getTopPlayers({ limit = 1000 } = {}) {
+  return topCache(`top|${limit}`, async () => {
+    const data = await apiGet('/players', { limit, sort_by: 'ckz-rating', sort_order: 'descending' });
+    return { values: data?.values ?? [], total: data?.total ?? 0 };
+  });
+}
+
+/**
+ * Where a SteamID sits among all CS2KZ players by CKZ rating.
+ * { rank, total, coverage } — rank is null when they're outside the snapshot.
+ */
+export async function globalStanding(steamId) {
+  const { values, total } = await getTopPlayers();
+  const at = values.findIndex((p) => p.id === steamId);
+  return { rank: at < 0 ? null : at + 1, total, coverage: values.length };
+}
+
 /** Look up a single player. Returns the player object, or null if not found (404). */
 export async function getPlayer(steamId) {
   return apiGet(`/players/${encodeURIComponent(steamId)}`);

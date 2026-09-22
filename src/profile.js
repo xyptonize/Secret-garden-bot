@@ -13,6 +13,7 @@ import { savedContacts, steamLink } from './contacts.js';
 import { steamIdTo64 } from './steamid.js';
 import { rankFor } from './ranks.js';
 import { formatNumber } from './format.js';
+import { globalStandingText } from './commands.js';
 import { playerStats } from './draftHistory.js';
 import { auraOf } from './draft.js';
 
@@ -91,11 +92,15 @@ async function execute(interaction) {
     const steam64 = steamIdTo64(player.steamId);
     if (steam64) lines[0] += ` · [profile](https://steamcommunity.com/profiles/${steam64})`;
     try {
-      const data = await kz.getPlayer(player.steamId);
+      const [data, standing] = await Promise.all([
+        kz.getPlayer(player.steamId),
+        kz.globalStanding(player.steamId).catch(() => null),
+      ]);
       if (data) {
         const rank = rankFor(data.ckz_rating);
         lines.push(
           `CKZ **${formatNumber(data.ckz_rating ?? 0)}**${rank ? ` · ${rank.name}` : ''} · VNL **${formatNumber(data.vnl_rating ?? 0)}**`,
+          `🌍 Global ${globalStandingText(data.ckz_rating, standing)}`,
         );
       } else {
         lines.push('_Not in the CS2KZ database yet._');

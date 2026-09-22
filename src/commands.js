@@ -30,6 +30,18 @@ function requireAdmin(interaction) {
   return false;
 }
 
+/**
+ * "#216 of 127,747" — where a rating sits among every CS2KZ player. Most of
+ * those accounts never played, so we quote the position, never a percentile,
+ * and say plainly when someone is outside the snapshot we fetch.
+ */
+export function globalStandingText(rating, standing) {
+  if (!rating) return 'unranked';
+  if (!standing) return '—';
+  if (standing.rank) return `**#${formatNumber(standing.rank)}** of ${formatNumber(standing.total)}`;
+  return `outside the top ${formatNumber(standing.coverage)}`;
+}
+
 /** Permissions the bot is missing to post embeds in a channel (thread-aware). */
 function missingPostPerms(channel, me) {
   const perms = channel?.permissionsFor?.(me);
@@ -231,15 +243,17 @@ const profile = {
       kz.getAllMaps(),
       kz.getPersonalBests({ player: entry.steamId, mode: apiMode, limit: 1000 }),
       kz.getPersonalBests({ player: entry.steamId, mode: apiMode, hasTeleports: false, limit: 1000 }),
+      kz.globalStanding(entry.steamId),
     ]);
     const valueOr = (result, fallback) => (result.status === 'fulfilled' ? result.value : fallback);
 
-    const [playerResult, recentResult, mapsResult, tpResult, proResult] = settled;
+    const [playerResult, recentResult, mapsResult, tpResult, proResult, standingResult] = settled;
     const data = valueOr(playerResult, null);
     const recent = valueOr(recentResult, []);
     const maps = valueOr(mapsResult, []);
     const tpPbs = valueOr(tpResult, []);
     const proPbs = valueOr(proResult, []);
+    const standing = valueOr(standingResult, null);
 
     const lookupFailed = playerResult.status === 'rejected';
     const anyFailed = settled.some((r) => r.status === 'rejected');
@@ -263,6 +277,7 @@ const profile = {
         { name: 'CKZ rating', value: (data.ckz_rating ?? 0).toFixed(1), inline: true },
         { name: 'VNL rating', value: (data.vnl_rating ?? 0).toFixed(1), inline: true },
       );
+      embed.addFields({ name: '🌍 Global', value: globalStandingText(data.ckz_rating, standing), inline: true });
       if (data.first_joined_at) {
         const ts = Math.floor(new Date(data.first_joined_at).getTime() / 1000);
         embed.addFields({ name: 'First seen', value: `<t:${ts}:D>`, inline: true });
@@ -1326,10 +1341,10 @@ const rootBuilder = new SlashCommandBuilder()
       .setName('maptop')
       .setDescription("This server's ranking on a map, with each run's global rank.")
       .addStringOption((o) =>
-        o.setName('map').setDescription('Map name, e.g. kz_grotto').setRequired(true),
+        o.setName('map').setDescription('Map name, e.g. kz_grotto').setRequired(true).setAutocomplete(true),
       )
       .addStringOption((o) =>
-        o.setName('course').setDescription('Course name (default: Main)'),
+        o.setName('course').setDescription('Course name (default: Main)').setAutocomplete(true),
       )
       .addStringOption((o) =>
         o
@@ -1372,7 +1387,9 @@ const rootBuilder = new SlashCommandBuilder()
         s
           .setName('add')
           .setDescription('(Admin) Create a bounty.')
-          .addStringOption((o) => o.setName('map').setDescription('Map name, e.g. kz_grotto').setRequired(true))
+          .addStringOption((o) =>
+          o.setName('map').setDescription('Map name, e.g. kz_grotto').setRequired(true).setAutocomplete(true),
+        )
           .addStringOption((o) => o.setName('reward').setDescription('The reward, e.g. $10').setRequired(true))
           .addStringOption((o) => o.setName('course').setDescription('Specific course (default: Main)'))
           .addStringOption((o) => modeChoices(o.setName('mode').setDescription('Require a mode (optional)')))
@@ -1405,6 +1422,42 @@ async function rootExecute(interaction) {
   const handler = subHandlers[interaction.options.getSubcommand()];
   if (handler) return handler.execute(interaction);
   return undefined;
+}
+
+/**
+ * Map and course suggestions while typing. Answered from the cached map list,
+ * so it costs no API call and stays inside Discord's 3-second window.
+ */
+export async function handleAutocomplete(interaction) {
+  const focused = interaction.options.getFocused(true);
+  let maps = [];
+  try {
+    maps = await kz.getAllMaps();
+  } catch {
+    return interaction.respond([]).catch(() => {});
+  }
+  const typed = String(focused.value ?? '').trim().toLowerCase();
+  let choices = [];
+
+  if (focused.name === 'map') {
+    choices = maps
+      .filter((m) => m.name.toLowerCase().includes(typed))
+      .sort((a, b) => (a.name.toLowerCase().startsWith(typed) === b.name.toLowerCase().startsWith(typed) ? a.name.localeCompare(b.name) : a.name.toLowerCase().startsWith(typed) ? -1 : 1))
+      .slice(0, 25)
+      .map((m) => ({ name: m.name.slice(0, 100), value: m.name.slice(0, 100) }));
+  } else if (focused.name === 'course') {
+    const wanted = String(interaction.options.getString('map') ?? '').trim().toLowerCase();
+    const map = maps.find((m) => m.name.toLowerCase() === wanted) || maps.find((m) => m.name.toLowerCase().includes(wanted));
+    const mode = interaction.options.getString('mode') === 'vnl' ? 'vanilla' : 'classic';
+    choices = (map?.courses ?? [])
+      .filter((c) => c.name.toLowerCase().includes(typed))
+      .slice(0, 25)
+      .map((c) => {
+        const tier = c.filters?.[mode]?.nub_tier;
+        return { name: `${c.name}${tier ? ` · ${tierLabel(tier)}` : ''}`.slice(0, 100), value: c.name.slice(0, 100) };
+      });
+  }
+  return interaction.respond(choices).catch(() => {});
 }
 
 /** Router keyed by the parent command name, used by the interaction handler. */
