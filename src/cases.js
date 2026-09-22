@@ -41,6 +41,10 @@ const CASE_NAME = 'Garden Case';
 const BRAG_FROM = rarityRank('covert');
 
 const sleep = (ms) => (ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve());
+// Who is mid-reveal. A button press is acknowledged before the animation ends,
+// so an impatient double-click would otherwise spend a second case whose reveal
+// is immediately overwritten by the first.
+const opening = new Set();
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // ---------------------------------------------------------------------------
@@ -251,6 +255,14 @@ function inventoryView(guildId, user) {
   const equipped = backgroundById(p.equipped) || backgroundById(DEFAULT_BACKGROUND);
   const claimed = p.lastDaily === today();
 
+  // Drawn first: if it fails, the inventory still answers, just without a picture.
+  let sheet = null;
+  try {
+    sheet = file(renderCollection(p.owned), 'collection.png');
+  } catch (err) {
+    console.error(`Collection sheet failed: ${err.message}`);
+  }
+
   const embed = new EmbedBuilder()
     .setColor(rarityOf(equipped.rarity).color)
     .setTitle(`🎒 ${user.displayName || user.username}'s collection`)
@@ -268,8 +280,8 @@ function inventoryView(guildId, user) {
         .map((x) => `${x.rarity.emoji} ${x.rarity.name} — **${x.have}/${x.total}**`)
         .join('\n'),
     })
-    .setImage('attachment://collection.png')
     .setFooter({ text: `Streak ${p.streak || 0} day(s) · a case costs ${config.casePrice} ${SEED}` });
+  if (sheet) embed.setImage('attachment://collection.png');
 
   const rows = equipRow(guildId, user.id);
   if ((p.cases || 0) > 0 || !claimed) {
@@ -286,7 +298,7 @@ function inventoryView(guildId, user) {
     }
     rows.push(row);
   }
-  return { embeds: [embed], components: rows, files: [file(renderCollection(p.owned), 'collection.png')] };
+  return { embeds: [embed], components: rows, files: sheet ? [sheet] : [], attachments: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +318,21 @@ function spinStrip(exclude) {
  * or better pull is also posted to the channel, CS2-style.
  */
 async function revealOpen(interaction, userId) {
+  const busy = `${interaction.guildId}|${userId}`;
+  if (opening.has(busy)) {
+    return interaction
+      .followUp({ flags: MessageFlags.Ephemeral, content: '⏳ Still opening that one — give it a second.' })
+      .catch(() => {});
+  }
+  opening.add(busy);
+  try {
+    return await unbox(interaction, userId);
+  } finally {
+    opening.delete(busy);
+  }
+}
+
+async function unbox(interaction, userId) {
   const result = openCase(interaction.guildId, userId);
   if (!result) {
     return interaction.editReply({

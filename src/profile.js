@@ -284,7 +284,9 @@ export async function handleProfileButton(interaction) {
     }
     store.setContact(interaction.guildId, 'steam', ownerId, id64);
     await interaction.deferUpdate();
-    await interaction.editReply(await buildProfile(interaction, interaction.user));
+    // Redrawing the card is secondary: the confirmation below must still reach
+    // them even if the card underneath can no longer be edited.
+    await interaction.editReply(await buildProfile(interaction, interaction.user)).catch(() => {});
     return interaction
       .followUp({ flags: MessageFlags.Ephemeral, content: `🎮 Saved your Steam profile: ${steamLink(id64)}` })
       .catch(() => {});
