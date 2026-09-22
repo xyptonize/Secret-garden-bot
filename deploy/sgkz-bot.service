@@ -1,0 +1,19 @@
+[Unit]
+Description=SG-BOT — Secret Garden Discord bot (CS2KZ + birthdays)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Change these two if you extract somewhere else or run as another user:
+WorkingDirectory=/opt/sgkz-bot
+User=sgkz
+# Full path to node (run `which node` on the server and paste it here if different):
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=5
+# dotenv reads .env from WorkingDirectory, so no EnvironmentFile is needed.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

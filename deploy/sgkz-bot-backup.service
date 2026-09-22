@@ -1,0 +1,9 @@
+[Unit]
+Description=SG-BOT - daily backup of data/
+
+[Service]
+Type=oneshot
+# tengis.g (numeric, so it works before directory services are up)
+User=701439135
+Group=701400513
+ExecStart=/home/tengis.g/bot/deploy/backup-data.sh

@@ -1,0 +1,286 @@
+# SG-BOT
+
+The Secret Garden Discord bot. Each feature has its own `sg***` command root:
+
+| Root | Feature |
+|---|---|
+| `/sgkz` | CS2KZ records, rankings, rank roles, maps & bounties |
+| `/sghb` | Birthday reminders |
+| `/sgdraft` | CS2 team drafter — balanced teams by AURA, plus a bracket |
+
+## CS2KZ (`/sgkz`)
+
+Members link their SteamID, then:
+
+- 🏁 **Announces new CS2KZ records** in a channel of your choice, automatically.
+- 🏆 **Shows a leaderboard** of *only your registered members*, ranked by CKZ or VNL rating.
+- 📌 Keeps an **auto-updating pinned leaderboard** message current.
+- 🎖️ **Assigns CKZ rank roles** (Noob → God) to members based on their rating.
+- 🎉 **Announces rank-ups** when a member climbs into a higher tier.
+- 👤 Looks up any registered member's CS2KZ profile.
+
+Data comes from the official [CS2KZ API](https://docs.cs2kz.org/api/).
+
+---
+
+## 1. Create the Discord bot
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) → **New Application**. Name it.
+2. On **General Information**, copy the **Application ID** → this is your `CLIENT_ID`.
+3. Open the **Bot** tab → **Reset Token** → copy it → this is your `DISCORD_TOKEN`. Keep it secret.
+4. Still on the **Bot** tab, you do **not** need any Privileged Gateway Intents (this bot uses slash commands).
+5. Open **OAuth2 → URL Generator**:
+   - Scopes: check **`bot`** and **`applications.commands`**.
+   - Bot Permissions: **Send Messages**, **Embed Links**, **Read Message History**, **Manage Messages** (to pin the leaderboard), **Manage Roles** (to create & assign rank roles).
+   - Copy the generated URL, open it, and invite the bot to your server.
+
+> **Rank roles:** after inviting, go to **Server Settings → Roles** and drag the **bot's own role above** the `CKZ …` rank roles. Discord only lets a bot manage roles below its highest role. If you don't want rank roles at all, set `ENABLE_RANK_ROLES=false` in `.env`.
+
+## 2. Get your IDs
+
+In Discord, enable **Settings → Advanced → Developer Mode**. Then:
+
+- Right-click your **server icon → Copy Server ID** → `GUILD_ID`.
+- Right-click the **channel** you want announcements in → **Copy Channel ID** → `ANNOUNCE_CHANNEL_ID` (optional; you can also set it later with `/sgkz setchannel`).
+
+## 3. Configure
+
+```powershell
+# In the project folder:
+copy .env.example .env
+```
+
+Open `.env` and fill in `DISCORD_TOKEN`, `CLIENT_ID`, and (recommended) `GUILD_ID`.
+
+## 4. Install & run
+
+```powershell
+npm install
+npm run deploy    # registers the slash commands (run again whenever commands change)
+npm start         # starts the bot
+```
+
+If `GUILD_ID` is set, commands appear instantly. Without it they register globally and can take up to an hour.
+
+---
+
+## Commands
+
+Every command lives under one parent command, `/sgkz` by default (set `COMMAND_ROOT` in `.env`), so it can't clash with other bots.
+
+| Command | Who | What it does |
+|---|---|---|
+| `/sgkz register <steamid>` | anyone | Link your Steam account. Accepts SteamID64 (`7656…`), `STEAM_1:0:…`, `[U:1:…]`, or a `steamcommunity.com/profiles/…` link. |
+| `/sgkz unregister [user]` | anyone / admins | Stop tracking you and remove you from the leaderboard (your CKZ rank role is removed too). Admins can remove someone else, e.g. a member who left. |
+| `/sgkz rankings [mode]` | anyone | Leaderboard of registered members by CKZ (default) or VNL rating. |
+| `/sgkz profile [user] [mode]` | anyone | Member's CS2KZ stats, latest run, and a PRO/TP completion table by tier. |
+| `/sgkz ranks` | anyone | The CKZ rank ladder and your current rank. |
+| `/sgkz unfinished <tier> [type] [mode] [user]` | anyone | Courses of a tier (or all) not yet completed. |
+| `/sgkz finished <tier> [type] [mode] [user]` | anyone | Courses of a tier already completed, with times. |
+| `/sgkz maplists [tier] [type] [mode]` | anyone | Every approved CS2KZ map, grouped by tier. |
+| `/sgkz maptop <map> [course] [type] [mode]` | anyone | This server's ranking on one course, with each run's global rank. |
+| `/sgkz bounty list` | anyone | Active and recently claimed bounties. |
+| `/sgkz bounty add <map> <reward> [course] [mode] [type] [note]` | admins | The first registered member to finish the map *after the bounty is posted* wins; if two finish between checks, whoever finished first. No course means the **Main** course. |
+| `/sgkz bounty remove <id>` | admins | Cancel a bounty. |
+| `/sgkz leaderboard setup [channel]` | admins | Post & pin the live leaderboard and create rank roles. |
+| `/sgkz leaderboard refresh` | admins | Update the pinned leaderboard and rank roles immediately. |
+| `/sgkz setchannel [channel]` | admins | Choose where record, rank-up and bounty announcements are posted. |
+| `/sgkz help` | anyone | Command overview (generated from the registered commands). |
+
+"Admins" means members with the **Manage Server** permission.
+
+> Custom vanity URLs (`steamcommunity.com/id/name`) can't be resolved without a Steam Web API key — open your profile and copy the numeric `/profiles/7656…` link instead.
+
+## Unfinished maps
+
+`/sgkz unfinished` shows which maps of a given tier a member still needs to complete. Tiers are:
+
+`1 Very Easy · 2 Easy · 3 Medium · 4 Advanced · 5 Hard · 6 Very Hard · 7 Extreme · 8 Death · 9 Unfeasible · 10 Impossible`
+
+So "tier 4" is **Advanced**. Example: `/sgkz unfinished tier:Tier 4 · Advanced mode:ckz` lists every Advanced CKZ course you haven't finished, grouped by map.
+
+**PRO vs TP** — the `type` option (default **Both**) shows two separate sections:
+
+- 🟢 **PRO** — finished with **0 teleports**. Matched against each course's `pro_tier`.
+- 🔵 **TP** — finished with teleports allowed (any completion counts). Matched against each course's `nub_tier`.
+
+Because a course can have a different PRO tier and TP tier, the two lists are genuinely different. Pick `type: PRO` or `type: TP` to see just one.
+
+> Discord slash commands use named options rather than free text, so `/cs2kz ckz tier4` becomes **`/sgkz unfinished`** with `tier` = *Tier 4 · Advanced* and `mode` = *Classic (CKZ)* picked from dropdowns.
+
+## Live leaderboard & CKZ rank roles
+
+Run **`/sgkz leaderboard setup`** (admins) in the channel you want the standings in. The bot:
+
+1. Posts a leaderboard embed of your registered members (by CKZ rating) and **pins it**.
+2. Creates one Discord role per rank tier (`CKZ Noob`, `CKZ Intermediate`, …).
+3. Every `LEADERBOARD_INTERVAL_SECONDS` (default 15 min) it re-fetches everyone's rating, edits the pinned message in place, and updates each member's rank role (adds the one they qualify for, removes the others).
+
+Use `/sgkz leaderboard refresh` to update instantly, and `/sgkz ranks` to see the ladder and your current rank.
+
+### Editing the rank ladder
+
+The ladder lives in **`src/ranks.js`** — one array, easy to change:
+
+```js
+export const RANKS = [
+  { name: 'Noob',         minRating: 0,     color: 0x95a5a6 },
+  { name: 'Intermediate', minRating: 5000,  color: 0x2ecc71 },
+  { name: 'Elite',        minRating: 10000, color: 0x3498db },
+  { name: 'Master',       minRating: 15000, color: 0x9b59b6 },
+  { name: 'Pro',          minRating: 20000, color: 0xf1c40f },
+  { name: 'Legend',       minRating: 25000, color: 0xe74c3c },
+  { name: 'God',          minRating: 30000, color: 0xe91e63 },
+];
+```
+
+Each member gets the highest rank whose `minRating` ≤ their `ckz_rating`. Keep the list ordered ascending. `ckz_rating` is the CS2KZ "Player Points" total. After editing names, the bot creates the new roles on the next refresh — delete any now-unused old `CKZ …` roles manually.
+
+### Rank-up announcements
+
+When a member crosses into a higher rank, the bot posts a 🎉 celebration to the **announcement channel** (the one from `/sgkz setchannel` / `ANNOUNCE_CHANNEL_ID`). It primes silently on first run, so it never announces everyone's current rank, and it stays quiet on rank *drops* (which can happen if ratings are recalculated). Set `ENABLE_RANKUP_ANNOUNCEMENTS=false` to turn it off.
+
+> CS2KZ only officially documents Noob / Intermediate / Pro tiers; the higher tiers here are a starting point you can tune freely.
+
+## How announcements work
+
+The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When you `/sgkz register`, it records your **existing** runs so it won't spam your history — only runs you set *after* registering are announced. Set `ANNOUNCE_MIN_POINTS` in `.env` if you only want noteworthy runs announced.
+
+## Configuration reference (`.env`)
+
+| Variable | Required | Default | Meaning |
+|---|---|---|---|
+| `DISCORD_TOKEN` | ✅ | — | Bot token. |
+| `CLIENT_ID` | ✅ | — | Application ID. |
+| `GUILD_ID` | recommended | — | Your server ID (instant command registration). |
+| `ANNOUNCE_CHANNEL_ID` | — | — | Default announcement channel (or use `/sgkz setchannel`). |
+| `POLL_INTERVAL_SECONDS` | — | `120` | How often to check for new records (min 30). |
+| `ANNOUNCE_MIN_POINTS` | — | `0` | Only announce runs worth at least this many points. |
+| `DEFAULT_MODE` | — | `ckz` | Default mode for rankings, profiles and map commands (`ckz` or `vnl`). |
+| `LEADERBOARD_INTERVAL_SECONDS` | — | `900` | How often to refresh the pinned leaderboard and rank roles (min 60). |
+| `ENABLE_RANK_ROLES` | — | `true` | Set `false` to skip creating/assigning rank roles. |
+| `ENABLE_RANKUP_ANNOUNCEMENTS` | — | `true` | Set `false` to skip 🎉 rank-up announcements. |
+| `RANK_ROLE_PREFIX` | — | `CKZ` | Prefix for auto-created rank roles (`CKZ Noob`, …). |
+| `LEADERBOARD_TITLE` | — | `CS2KZ Leaderboard — CKZ` | Title of the pinned leaderboard embed. |
+| `COMMAND_ROOT` | — | `sgkz` | Parent command name (`/sgkz register`, …). Re-run `npm run deploy` after changing it. |
+| `BIRTHDAY_COMMAND_ROOT` | — | `sghb` | Parent command for birthday commands. |
+| `BIRTHDAY_CHANNEL_ID` | — | — | Default birthday channel (or use `/sghb setchannel`). |
+| `BIRTHDAY_HOUR` | — | `9` | Hour (0–23) the birthday message is posted. |
+| `BIRTHDAY_TIMEZONE` | — | server timezone | IANA timezone for the hour above, e.g. `Asia/Ulaanbaatar`. |
+| `DRAFT_GIRL_ROLE` | — | `HOT GIRLS🎀` | Role (name or id) marking girl players for the drafter. |
+| `DRAFT_AURA_GOD` / `DRAFT_AURA_KING` | — | `0` / `0.5` | AURA values of the GOD and KING roles. |
+| `DRAFT_DEFAULT_AURA` | — | `5.5` | AURA for players with no AURA role. |
+| `DRAFT_STICKY_SECONDS` | — | `5` | Keep open lobbies at the bottom of their channel: re-post after this many quiet seconds (0 = off). |
+| `DRAFT_RESHUFFLE_TOLERANCE` | — | `1` | How far from the best split a Reshuffle may go. |
+| `CS2KZ_API_BASE` | — | `https://api.cs2kz.org` | API base URL. |
+
+## Birthday reminders (`/sghb`)
+
+| Command | Who | What it does |
+|---|---|---|
+| `/sghb set <day> <month> [year]` | anyone | Save your birthday. The year is optional and only used to show the age; leaving it empty keeps the year you saved before (use `remove` then `set` to clear it). |
+| `/sghb remove [user]` | anyone / admins | Remove your birthday (admins can remove anyone's). |
+| `/sghb list` | anyone | Upcoming birthdays, soonest first. |
+| `/sghb add <user> <day> <month> [year]` | admins | Save someone else's birthday. |
+| `/sghb setchannel [channel]` | admins | Choose the birthday channel (separate from the `/sgkz` announcement channel). |
+
+Every day at `BIRTHDAY_HOUR` (default 09:00) in `BIRTHDAY_TIMEZONE` (default: the server's timezone) the bot posts one 🎂 message in the birthday channel, pinging everyone whose birthday it is. If the bot was offline at that hour, it posts once when it comes back that day, and never twice. People born on 29 February are celebrated on 28 February in non-leap years. Members who have left the server are skipped.
+
+## CS2 team drafter (`/sgdraft`)
+
+| Command | Who | What it does |
+|---|---|---|
+| `/sgdraft start [title] [join]` | anyone | Open a lobby in this channel. The number of teams is decided at Draft, once everyone has joined. |
+| `/sgdraft add <user>` / `/sgdraft kick <user>` | host | Add or remove a player in this channel's lobby. |
+| `/sgdraft swap <player1> <player2>` | host | Swap two drafted players (between teams, or with someone sitting out). |
+| `/sgdraft aura [user]` | anyone | Show a player's AURA (and 🎀) as the drafter reads it. |
+| `/sgdraft mock count:<n>` / `clear:True` | host | Add fake players (🧪 Mock 01, …) to test the whole flow in Discord, or remove them. A lobby with mock players is a **test lobby**: its brackets are never saved to history. |
+| `/sgdraft sub <out> <in>` | host | Replace a player who can't continue, even mid-tournament (same as the 🔁 Sub button). |
+| `/sgdraft host <user>` | host, or an admin | Hand the lobby to a new host. An admin can take over only a lobby whose host has **left the server or been inactive for an hour**, and the handover is announced in the channel. |
+| `/sgdraft close` | host | Close this channel's lobby (same as the Close button). This also works if the lobby message was deleted. |
+| `/sgdraft history [user] [page]` | anyone | Past tournaments, newest first (optionally only ones a player was in). |
+| `/sgdraft game <id>` | anyone | One tournament in full: every team and its players, every result, byes, who sat out. |
+| `/sgdraft stats [user]` | anyone | A player's tournaments, titles, match W–L, most frequent teammates, recent results. |
+| `/sgdraft top` | anyone | Leaderboard: most titles, then most match wins. |
+
+**1. Lobby.** Players click **Join** and get a private confirmation ("✅ You joined … as player #3 · AURA 3.5"). Pressing Join again tells them they're already in and which number they are. Each player is listed by name with their AURA and 🎀, read from their roles. A player with no AURA role counts as `DRAFT_DEFAULT_AURA` (5.5) and is marked ❔.
+
+**2. Teams.** Nobody knows in advance how many will show up, so the team count isn't set up front. When the host presses **Draft**, the bot privately asks **"How many teams?"** and lists only what the turnout allows. For example, 17 players gives *2 teams (10 play · 7 sit out)* or *3 teams (15 play · 2 sit out)*. With 10–14 players 2 teams is the only option, so it drafts right away. The last to join sit out, and the host can Swap anyone in. After the draft, a menu on the lobby lets the host change the number of teams (it redrafts). Draft balances every team against every other by total AURA, so the *spread* (highest − lowest total) is as small as possible. AURA is the raw role number: `AURA - GOD` = `DRAFT_AURA_GOD` (0), `AURA - KING` = `DRAFT_AURA_KING` (0.5), and roles are re-read at every draft. Up to 24 teams.
+- **Top tiers are split up.** With N teams, the N strongest players each lead a different team. With 4 teams and GOD, KING, 1, 1.5 on top, each of them is on another team. A tie at the cutoff (two 1.5s for the last spot) is broken at random. Among equally balanced lineups the bot also picks the least stacked one, so a spare strong player goes to a team led by a weaker top player, never to GOD's.
+- **Girls** (`DRAFT_GIRL_ROLE`, default `HOT GIRLS🎀`) are spread evenly, so team girl counts differ by at most one and as many teams as possible get one. With fewer girls than teams, the rest are balanced on AURA alone.
+- **🔀 Reshuffle** shows another lineup within `DRAFT_RESHUFFLE_TOLERANCE` (1) of the best spread.
+- **✏️ Swap** lets the host trade any two players. Totals update right away and the teams are marked *edited by host*.
+
+**3. Bracket.** The host picks how the first round is paired: **🎲 Bracket — random**, **⚖️ Bracket — by AURA**, or **✋ Bracket — pick matchups**. It's single elimination with one winner.
+- *Random:* random pairings and random byes.
+- *By AURA:* the teams with the closest totals face each other, and with an odd number of teams the weakest (highest total) get the byes.
+- *Pick matchups:* the bot asks the host privately for two teams at a time — "choose two teams for match 1 of 2" — until every match is set. Teams left unpaired get the byes, and the host is told how many that will be. **Cancel** drops it; nothing starts until the last pair is chosen. The bracket then shows *matchups picked by the host*.
+- The host clicks **Team X won** for each match, and winners advance automatically. When the final is decided, the bot posts 🏆 and pings the winning team.
+- **↩️ Undo result** reverts the last result. **Cancel bracket** returns to the teams, unlocked. Teams and the roster are locked while a bracket runs.
+
+**🔒 Lock.** The host can lock the lobby (button next to Notify): Join and Leave grey out, nobody can come or go, and the footer shows 🔒. **Unlock** reopens it. The host can still add, kick, swap and sub while locked.
+
+**A late Join never destroys the teams.** Even unlocked, someone joining after the draft is added to the players **sitting out** — the teams stay exactly as they were, and the host can Reshuffle them in or bring them on with Sub. The teams are only cleared when someone *on a team* leaves or is kicked, since then a team really is a player short (whoever did it is told).
+
+**📣 Notify.** The host can call players in at any time with **📣 Notify**. **Before the draft**, everyone who has joined is pinged and DM'd that the lobby *is about to start*. **After the draft** (the button sits next to Start bracket, or first in the row during a bracket), everyone on a team is **@pinged in the channel** and gets a **DM with a link to the lobby's channel** (the lobby is always the newest message there). Players sitting out and mock players aren't notified. The host is told how many were pinged and DM'd, and how many have DMs closed. There's a 1-minute cooldown so a double-click can't ping everyone twice; press it again after changes to re-notify.
+
+**Substitutes.** If a player can't continue, even in the middle of a bracket, the host presses **🔁 Sub** (or runs `/sgdraft sub`). The bot asks privately *who can't continue?* and then *who replaces them?*: someone sitting out, or **anyone in the server**, even if they never joined. The newcomer takes the same spot on the same team, the leaver moves to *sits out*, and the channel gets a 🔁 message pinging the newcomer. Substitution is the only roster change allowed while a bracket runs.
+
+**4. History (kept forever).** Every bracket is recorded as a numbered tournament (`#1`, `#2`, …) in `data/draft-history.json` as soon as it starts, and the record is updated after every result or Undo.
+- **What's saved:** the title, host, pairing mode, start and end time, each team with its players (name, AURA and 🎀 *as they were at the time*), who sat out, byes, every match (round, which team beat which, **and the exact lineups that played it**), every substitution (who left, who came in, after which match) and the champion. `/sgdraft stats` credits each win or loss to whoever actually played that match, and a title to whoever played the final.
+- **Unfinished brackets:** one cancelled or closed before any result is dropped. One stopped after some matches is kept and marked *cancelled*, because those games were played.
+- **Nothing is ever deleted automatically.** Back up `data/draft-history.json` together with `data/store.json`.
+
+**Stays at the bottom.** An open lobby never gets buried by chat. When people talk in its channel, the bot re-posts the lobby below the new messages and deletes the old copy. It waits until the chat has been quiet for `DRAFT_STICKY_SECONDS` (default 5), but never more than 4× that during non-stop chat. Set it to `0` to turn this off. Clicking a button on an old copy just says the lobby moved.
+
+**Deleting the lobby message doesn't close it.** If a moderator or a purge bot deletes it, the bot re-posts it. Only the host closes a lobby; deleting the whole channel or thread also ends it.
+
+**Only the host runs the lobby.** Every lobby control (Draft, Reshuffle, Swap, team count, bracket, winners, Undo, Cancel, Close and the host commands) works for the host only, even for members with Manage Server. **Close asks for confirmation.** If the host disappears, an admin passes the lobby on with `/sgdraft host`.
+
+Lobbies are saved to `data/store.json`, so they survive bot restarts. A lobby stays open until the host (or an admin) clicks **Close** or runs `/sgdraft close`, or until its message is deleted. The bot notices deletions, which is why it uses the non-privileged *Guild Messages* intent; no Developer Portal change is needed.
+
+## Contacts — Instagram (`/sgig`), phone (`/sgphone`), Steam (`/sgsteam`)
+
+Members save their own; `/sgig` is public, `/sgphone` is private.
+
+| Command | Who | What it does |
+|---|---|---|
+| `/sgig set <value>` | anyone | Save your Instagram handle. Accepts `name`, `@name` or an instagram.com link. |
+| `/sgig view [user]` | anyone | Show someone's handle as a clickable link (public reply). |
+| `/sgig list` | anyone | Everyone's handles. |
+| `/sgig remove [user]` | anyone / admins | Remove yours; admins can remove anyone's. |
+| `/sgphone set <value>` | anyone | Save your number. Accepts 8 digits (`9911 2233` → `+976 9911 2233`), `+976…`, `00976…` or any international `+…` number. |
+| `/sgphone view [user]` | you / admins | **Private reply.** Only you can see your own; only admins can look up someone else's. |
+| `/sgphone list` | admins | **Private reply.** Everyone's numbers. Members get "🔒 Phone numbers are private". |
+| `/sgphone remove [user]` | anyone / admins | Remove yours; admins can remove anyone's. |
+| `/sgsteam set <value>` | anyone | Save your Steam profile. Accepts a `steamcommunity.com/id/…` or `/profiles/…` link, a SteamID64, `STEAM_1:0:…` or `[U:1:…]`. |
+| `/sgsteam view [user]` / `list` / `remove [user]` | anyone | Same as `/sgig`, public. |
+
+Every `/sgphone` reply is ephemeral, so a number is never posted into a channel. Numbers and handles live in `data/store.json` (mode 600, owner tengis.g) and are included in the daily backup. Set `PHONE_COUNTRY_CODE` / `PHONE_LOCAL_DIGITS` in `.env` for another country (defaults `+976` and 8).
+
+## `/sgprofile` — one card per member
+
+`/sgprofile [user]` puts everything the bot knows in one public embed:
+
+- **💬 Discord** — when they joined the server, when the account was created, whether they're boosting, and their top roles.
+- **🔗 Saved** — birthday (with age when the year is known), Instagram, Steam. A saved phone number only ever shows as *private*, never the number.
+- **🏁 CS2KZ** — their SteamID and Steam link, plus live CKZ/VNL ratings and rank, when they're registered with `/sgkz register`.
+- **🎮 Draft** — their AURA (read from their roles) and their tournament record: played, titles, W–L.
+
+Sections with nothing to show are left out, and a member who has left the server still shows what they saved.
+
+## Backups and service
+
+- **Daily backup:** `sgkz-bot-backup.timer` runs `deploy/backup-data.sh` at 04:30 and saves `data/` (registrations, bounties, birthdays, lobbies, draft history) as `/home/tengis.g/bot-backups/data-YYYY-MM-DD.tar.gz`. It keeps 30 days, readable only by tengis.g. Run one now with `systemctl start sgkz-bot-backup`.
+- **Restoring:** `systemctl stop sgkz-bot`, then `tar -xzf /home/tengis.g/bot-backups/data-<date>.tar.gz -C /home/tengis.g/bot/data`, then `systemctl start sgkz-bot`.
+- **Service user:** the bot runs as **tengis.g**, not root (`/etc/systemd/system/sgkz-bot.service.d/override.conf`, a copy is in `deploy/`), with `NoNewPrivileges`, `PrivateTmp` and `ProtectSystem=full`. `data/` must stay owned by tengis.g.
+
+## Where data is stored
+
+Registrations, seen-record state, bounties, rank-role IDs, birthdays and open draft lobbies live in `data/store.json`; draft tournament history lives in `data/draft-history.json`. Both are created automatically and git-ignored; back up the whole `data/` folder to keep registrations and history.
+
+## Notes
+
+- Runs with **0 teleports** are shown as **PRO**; others show the teleport count.
+- "CKZ" = Classic mode, "VNL" = Vanilla mode — matching the API's `ckz_rating` / `vnl_rating`.
+- The bot only needs one process running. Host it anywhere that keeps Node alive (your PC, a VPS, etc.).
