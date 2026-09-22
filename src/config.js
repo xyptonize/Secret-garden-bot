@@ -49,6 +49,18 @@ export const config = {
   profileRoot: rootName(process.env.PROFILE_COMMAND_ROOT, 'sgprofile'),
   phoneCountry: (process.env.PHONE_COUNTRY_CODE || '+976').trim(), // local numbers get this prefix
   phoneLocalDigits: Math.max(4, numberOr(process.env.PHONE_LOCAL_DIGITS, 8)),
+  // Profile-card backgrounds, unboxed from cases like CS2 skins.
+  caseRoot: rootName(process.env.CASE_COMMAND_ROOT, 'sgcase'),
+  caseDailySeeds: Math.max(0, numberOr(process.env.CASE_DAILY_SEEDS, 25)), // free seeds with the daily case
+  caseStreakSeeds: Math.max(0, numberOr(process.env.CASE_STREAK_SEEDS, 5)), // extra per consecutive day
+  caseStreakMax: Math.max(0, numberOr(process.env.CASE_STREAK_MAX, 100)), // cap on the streak bonus
+  casePrice: Math.max(1, numberOr(process.env.CASE_PRICE, 400)), // seeds per bought case
+  caseDropChance: Math.min(1, Math.max(0, numberOr(process.env.CASE_DROP_CHANCE, 0.2))), // per announced KZ record
+  caseDropDailyCap: Math.max(0, numberOr(process.env.CASE_DROP_DAILY_CAP, 3)), // playing drops per member per day
+  caseChampionCases: Math.max(0, numberOr(process.env.CASE_CHAMPION_CASES, 1)), // to each player on the winning team
+  caseRevealMs: Math.max(0, numberOr(process.env.CASE_REVEAL_MS, 900)), // pause between unboxing frames
+  // The day boundary for daily claims and drop caps — the server's own day.
+  caseTimeZone: process.env.CASE_TIMEZONE?.trim() || process.env.BIRTHDAY_TIMEZONE?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone,
 };
 
 function numberOr(value, fallback) {

@@ -32,6 +32,7 @@ import {
   embedLength,
 } from 'discord.js';
 import { config } from './config.js';
+import { awardChampions } from './cases.js';
 import * as store from './store.js';
 import {
   draft,
@@ -1405,6 +1406,9 @@ async function handleLobbyAction(interaction) {
       const winner = champion(lobby.bracket);
       const champs = winner != null ? lobby.result.teams[winner] : [];
       const ids = champs.filter((p) => !p.mock).map((p) => p.id);
+      // Champions earn profile-card cases — never from a test lobby, where
+      // nothing else counts either.
+      const cases = winner != null && !lobby.test ? awardChampions(guildId, ids) : 0;
       const gg = champs.map((p) => (p.mock ? nameOf(p) : `<@${p.id}>`)).join(' ');
       const ref = lobby.historyId != null ? ` · tournament **#${lobby.historyId}**` : lobby.test ? ' · 🧪 test, not saved' : '';
       // Built now, not after the await: a "Cancel bracket" landing in between
@@ -1414,7 +1418,9 @@ async function handleLobbyAction(interaction) {
       if (winner != null) {
         await interaction
           .followUp({
-            content: `🏆 **${teamName(winner)}** wins **${safeName(lobby.title)}**${ref}! GG ${gg}`,
+            content:
+              `🏆 **${teamName(winner)}** wins **${safeName(lobby.title)}**${ref}! GG ${gg}` +
+              (cases ? `\n🎁 Every champion earned **${cases}** Garden Case(s) — \`/${config.caseRoot} open\`` : ''),
             embeds: recap ? [recap] : [],
             allowedMentions: { users: ids },
           })

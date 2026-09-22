@@ -14,6 +14,7 @@ import {
   reconcileLobbies,
 } from './draft.js';
 import { contactCommands } from './contacts.js';
+import { caseCommands, isCaseComponent, handleCaseComponent, handleCaseAutocomplete } from './cases.js';
 import { profileCommands, isProfileButton, isProfileModal, handleProfileButton, handleProfileModal } from './profile.js';
 import { startAnnouncer } from './announcer.js';
 import { startLeaderboardUpdater } from './leaderboard.js';
@@ -21,7 +22,7 @@ import { startLeaderboardUpdater } from './leaderboard.js';
 store.load();
 
 // One router for every sg*** command root (/sgkz, /sghb, …).
-const commands = { ...kzCommands, ...birthdayCommands, ...draftCommands, ...contactCommands, ...profileCommands };
+const commands = { ...kzCommands, ...birthdayCommands, ...draftCommands, ...contactCommands, ...profileCommands, ...caseCommands };
 
 // GuildMessages (not privileged) + partial messages: /sgdraft needs to hear
 // about new messages (to keep lobbies at the bottom) and deleted ones. Message
@@ -61,7 +62,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Map/course suggestions while typing — must answer within 3 seconds.
   if (interaction.isAutocomplete()) {
     try {
-      await handleAutocomplete(interaction);
+      if (interaction.commandName === config.caseRoot) await handleCaseAutocomplete(interaction);
+      else await handleAutocomplete(interaction);
     } catch (err) {
       console.error('Autocomplete failed:', err.message);
     }
@@ -92,7 +94,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (interaction.isButton() || interaction.isAnySelectMenu()) {
     try {
-      if (isDraftButton(interaction)) await handleDraftButton(interaction);
+      if (isCaseComponent(interaction)) await handleCaseComponent(interaction);
+      else if (isDraftButton(interaction)) await handleDraftButton(interaction);
       else await handleComponent(interaction);
     } catch (err) {
       console.error('Component handler failed:', err);

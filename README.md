@@ -7,6 +7,9 @@ The Secret Garden Discord bot. Each feature has its own `sg***` command root:
 | `/sgkz` | CS2KZ records, rankings, rank roles, maps & bounties |
 | `/sghb` | Birthday reminders |
 | `/sgdraft` | CS2 team drafter — balanced teams by AURA, plus a bracket |
+| `/sgig` `/sgphone` `/sgsteam` | Saved contacts — Instagram, phone (admins only), Steam |
+| `/sgprofile` | One card per member: stats, socials, KZ and draft record |
+| `/sgcase` | Profile-card backgrounds, unboxed like CS2 skins |
 
 ## CS2KZ (`/sgkz`)
 
@@ -172,6 +175,16 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `DRAFT_DEFAULT_AURA` | — | `5.5` | AURA for players with no AURA role. |
 | `DRAFT_STICKY_SECONDS` | — | `5` | Keep open lobbies at the bottom of their channel: re-post after this many quiet seconds (0 = off). |
 | `DRAFT_RESHUFFLE_TOLERANCE` | — | `1` | How far from the best split a Reshuffle may go. |
+| `CASE_COMMAND_ROOT` | — | `sgcase` | Parent command for the card/case commands. |
+| `CASE_DAILY_SEEDS` | — | `25` | Seeds paid with the free daily case. |
+| `CASE_STREAK_SEEDS` | — | `5` | Extra seeds per consecutive daily claim… |
+| `CASE_STREAK_MAX` | — | `100` | …capped here. |
+| `CASE_PRICE` | — | `400` | Seeds per case in `/sgcase buy`. |
+| `CASE_DROP_CHANCE` | — | `0.2` | Chance of a case per announced KZ record (0–1). |
+| `CASE_DROP_DAILY_CAP` | — | `3` | Most play-drops one member can get in a day. |
+| `CASE_CHAMPION_CASES` | — | `1` | Cases for each player on a winning draft team. |
+| `CASE_REVEAL_MS` | — | `900` | Pause between unboxing animation frames. |
+| `CASE_TIMEZONE` | — | `BIRTHDAY_TIMEZONE` | Timezone deciding when "today" rolls over for daily claims. |
 | `CS2KZ_API_BASE` | — | `https://api.cs2kz.org` | API base URL. |
 
 ## Birthday reminders (`/sghb`)
@@ -270,7 +283,42 @@ Every `/sgphone` reply is ephemeral, so a number is never posted into a channel.
 - **🏁 CS2KZ** — their SteamID and Steam link, live CKZ/VNL ratings and rank, and their **global standing** among all CS2KZ players (e.g. `#216 of 127,747`), when they're registered with `/sgkz register`.
 - **🎮 Draft** — their AURA (read from their roles) and their tournament record: played, titles, W–L.
 
-Sections with nothing to show are left out, and a member who has left the server still shows what they saved.
+- **🎒 Cards** — how much of the background collection they've unlocked, and what they're holding.
+
+Sections with nothing to show are left out, and a member who has left the server still shows what they saved. The embed also carries a **rendered card image** — their avatar and stats over whichever background they have equipped (see below).
+
+## Profile-card backgrounds (`/sgcase`)
+
+Every `/sgprofile` card is drawn on a background, and backgrounds are unlocked from **Garden Cases** on CS2's own odds:
+
+| Rarity | Chance | Designs | A duplicate pays |
+|---|---|---|---|
+| 🔵 Mil-Spec | 79.92% | 7 | 🌱 20 |
+| 🟣 Restricted | 15.98% | 6 | 🌱 60 |
+| 🩷 Classified | 3.20% | 4 | 🌱 200 |
+| 🔴 Covert | 0.64% | 3 | 🌱 700 |
+| 🟡 Exceedingly Rare | 0.26% | 2 | 🌱 2,500 |
+
+All 22 designs are drawn by the bot itself (`src/cardArt.js`) — there are no image files to host, and the same id always draws the same picture. Rolls use a cryptographic random source.
+
+**Where cases come from — all four:**
+
+- 📅 `/sgcase daily` — one free case a day, plus 🌱 seeds (more for a longer streak).
+- 🏁 **Playing KZ** — a 20% chance of a case on each announced record, at most 3 a day. The drop is appended to the announcement.
+- 🏆 **Winning a draft** — every player on the champion team gets one (never from a 🧪 test lobby).
+- 🌱 `/sgcase buy` — 400 seeds each. Seeds come from duplicates and daily claims.
+
+| Command | Who | What it does |
+|---|---|---|
+| `/sgcase daily` | anyone | Claim today's free case and seeds. |
+| `/sgcase open` | anyone | Open a case, with a reveal. A Covert or better pull is announced to the channel. |
+| `/sgcase inventory [user]` | anyone | Cases, seeds, streak and a picture of the whole collection — with an equip menu on your own. |
+| `/sgcase preview <background>` | anyone | Look at any background (owned ones are suggested first). |
+| `/sgcase buy [cases]` | anyone | Buy cases with seeds. |
+| `/sgcase odds` | anyone | The drop table and where cases come from. |
+| `/sgcase give <user> [cases] [seeds]` | Manage Server | Hand out (or take back) cases and seeds. |
+
+A new background is equipped automatically when it's rarer than what you're wearing; otherwise pick one from `/sgcase inventory`. The case is spent and the result saved **before** the reveal is animated, so a Discord hiccup can never cost someone a pull.
 
 ## Backups and service
 
@@ -280,7 +328,7 @@ Sections with nothing to show are left out, and a member who has left the server
 
 ## Where data is stored
 
-Registrations, seen-record state, bounties, rank-role IDs, birthdays and open draft lobbies live in `data/store.json`; draft tournament history lives in `data/draft-history.json`. Both are created automatically and git-ignored; back up the whole `data/` folder to keep registrations and history.
+Registrations, seen-record state, bounties, rank-role IDs, birthdays, saved contacts, card collections and open draft lobbies live in `data/store.json`; draft tournament history lives in `data/draft-history.json`. Both are created automatically and git-ignored; back up the whole `data/` folder to keep registrations and history.
 
 ## Notes
 

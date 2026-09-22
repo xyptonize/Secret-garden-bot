@@ -7,6 +7,7 @@ import { birthdayCommandData } from './birthday.js';
 import { draftCommandData } from './draft.js';
 import { contactCommandData } from './contacts.js';
 import { profileCommandData } from './profile.js';
+import { caseCommandData } from './cases.js';
 
 const body = [
   ...commandData(),
@@ -14,6 +15,7 @@ const body = [
   ...draftCommandData(),
   ...contactCommandData(),
   ...profileCommandData(),
+  ...caseCommandData(),
 ];
 const rest = new REST({ version: '10' }).setToken(config.token);
 

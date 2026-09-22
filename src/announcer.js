@@ -4,6 +4,7 @@ import * as kz from './kzApi.js';
 import { recordEmbed, recordPoints } from './format.js';
 import { matchesBounty, bountyClaimEmbed, runTime } from './bounty.js';
 import { courseStanding } from './standing.js';
+import { maybeDropCase } from './cases.js';
 
 // Record queries are the slow ones (9-14s each), and the API slows further
 // under parallel load, so only a couple run at once. The rating sweep is a
@@ -137,7 +138,7 @@ export async function tick(client) {
   const failed = sweepFailed + recordsFailed;
   let dirty = false;
 
-  for (const g of Object.values(guilds)) {
+  for (const [guildId, g] of Object.entries(guilds)) {
     const channelId = g.announceChannelId || config.announceChannelId;
     const minPoints = g.minPoints ?? config.minPoints;
     // Everyone registered here, so a run can be placed against the server as
@@ -209,7 +210,7 @@ export async function tick(client) {
             try {
               // Never let a standing lookup block the announcement itself.
               const standing = await courseStanding(r, memberIds).catch(() => null);
-              await channel.send({
+              const posted = await channel.send({
                 content: `<@${discordId}>`,
                 embeds: [recordEmbed(r, discordId, standing)],
                 allowedMentions: { users: [discordId] },
@@ -217,6 +218,16 @@ export async function tick(client) {
               // Saved right away: a restart later in this tick must not post it again.
               store.addSeen(player, [r.id]);
               store.persist();
+              // A run that actually made it to the channel can drop a case. Rolled
+              // after the post, so a failed send never costs a roll or a case.
+              if (maybeDropCase(guildId, discordId)) {
+                await posted
+                  .edit({
+                    content: `<@${discordId}>\n🎁 **A Garden Case dropped!** Open it with \`/${config.caseRoot} open\``,
+                    allowedMentions: { users: [] },
+                  })
+                  .catch(() => {});
+              }
             } catch (err) {
               // Left unsettled on purpose: retried on the next tick.
               console.error(`Failed to post announcement (will retry): ${err.message}`);

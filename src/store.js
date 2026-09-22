@@ -252,6 +252,38 @@ export function removeContact(guildId, kind, discordId) {
   return existed;
 }
 
+// --- Profile cards: guild.cards = { "<discordId>": { owned, equipped, seeds, … } } ---
+
+export function getCardProfiles(guildId) {
+  const g = guild(guildId);
+  if (!g.cards) g.cards = {};
+  return g.cards;
+}
+
+/**
+ * One member's card collection, created on first touch. Everyone starts owning
+ * the starter background, so a card can always be drawn.
+ */
+export function getCardProfile(guildId, discordId, starter = 'midnight') {
+  const all = getCardProfiles(guildId);
+  if (!all[discordId]) {
+    all[discordId] = {
+      owned: { [starter]: 1 },
+      equipped: starter,
+      seeds: 0,
+      cases: 0,
+      opened: 0,
+      lastDaily: null,
+      streak: 0,
+      dropDate: null,
+      dropCount: 0,
+    };
+  }
+  const p = all[discordId];
+  if (!p.owned) p.owned = { [starter]: 1 };
+  return p;
+}
+
 /** Open /sgdraft lobbies, keyed by lobby message id. Kept until the host closes them. */
 export function getDraftLobbies() {
   if (!state.draftLobbies) state.draftLobbies = {};

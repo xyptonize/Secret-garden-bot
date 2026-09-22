@@ -14,6 +14,7 @@ import {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  AttachmentBuilder,
   MessageFlags,
 } from 'discord.js';
 import { config } from './config.js';
@@ -27,6 +28,8 @@ import { formatNumber } from './format.js';
 import { globalStandingText } from './commands.js';
 import { playerStats } from './draftHistory.js';
 import { auraOf } from './draft.js';
+import { renderCard } from './cards.js';
+import { equippedBackground, walletOf, profileCardRow } from './cases.js';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -35,6 +38,8 @@ const MONTHS = [
 const TOP_ROLES = 4;
 
 const day = (ms) => `<t:${Math.floor(ms / 1000)}:D>`;
+const shortDate = (ms) =>
+  new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
 /** "14 March", or "14 March 1999 · 27" when the year is known. */
 function birthdayText(b) {
@@ -153,7 +158,9 @@ async function buildProfile(interaction, user) {
       : `Nothing yet — try \`/${config.birthdayRoot} set\`, \`/${config.igRoot} set\`, \`/${config.steamRoot} set\`.`,
   });
 
-  // --- CS2KZ
+  // --- CS2KZ (kept for the card as well as the embed)
+  let kzData = null;
+  let kzStanding = null;
   const player = store.findByDiscord(guildId, user.id);
   if (player) {
     const lines = [`SteamID \`${player.steamId}\``];
@@ -164,6 +171,8 @@ async function buildProfile(interaction, user) {
         kz.getPlayer(player.steamId),
         kz.globalStanding(player.steamId).catch(() => null),
       ]);
+      kzData = data;
+      kzStanding = standing;
       if (data) {
         const rank = rankFor(data.ckz_rating);
         lines.push(
@@ -181,10 +190,8 @@ async function buildProfile(interaction, user) {
 
   // --- Draft
   const draftLines = [];
-  if (member) {
-    const aura = auraOf(member);
-    if (!aura.missing) draftLines.push(`AURA **${aura.label}**${aura.girl ? ' · 🎀' : ''}`);
-  }
+  const aura = member ? auraOf(member) : null;
+  if (aura && !aura.missing) draftLines.push(`AURA **${aura.label}**${aura.girl ? ' · 🎀' : ''}`);
   const stats = playerStats(guildId, user.id);
   if (stats) {
     const rate = stats.wins + stats.losses ? ` (${Math.round((100 * stats.wins) / (stats.wins + stats.losses))}%)` : '';
@@ -194,10 +201,58 @@ async function buildProfile(interaction, user) {
   }
   if (draftLines.length) embed.addFields({ name: '🎮 Draft', value: draftLines.join('\n') });
 
+  // --- Their unlocked card background
+  const wallet = walletOf(guildId, user.id);
+  if (wallet) {
+    embed.addFields({
+      name: '🎒 Cards',
+      value: `Collected **${wallet.have}/${wallet.total}** backgrounds · 🎁 **${wallet.cases}** case(s) · 🌱 **${wallet.seeds}** seeds`,
+    });
+  }
+
   const own = user.id === interaction.user.id;
+  const components = own ? [...fillButtons(guildId, user.id), profileCardRow(guildId, user.id)] : [];
+  const files = [];
+
+  // The card is decoration: if drawing it fails, the embed still answers.
+  try {
+    const subtitle = [];
+    if (aura && !aura.missing) subtitle.push(`AURA ${aura.label}${aura.girl ? ' 🎀' : ''}`);
+    if (member?.joinedTimestamp) subtitle.push(`Joined ${shortDate(member.joinedTimestamp)}`);
+    if (birthday) subtitle.push(`🎂 ${birthday.day} ${MONTHS[birthday.month - 1].slice(0, 3)}`);
+
+    const cells = [];
+    if (kzData) cells.push({ label: 'CKZ Rating', value: formatNumber(kzData.ckz_rating ?? 0) });
+    if (kzStanding?.rank) cells.push({ label: 'Global', value: `#${formatNumber(kzStanding.rank)}` });
+    if (stats) {
+      cells.push({ label: 'Tournaments', value: `${stats.played} · 🏆 ${stats.titles}` });
+      cells.push({ label: 'Draft W–L', value: `${stats.wins}–${stats.losses}` });
+    }
+    if (!cells.length) {
+      if (member?.joinedTimestamp) cells.push({ label: 'Member since', value: shortDate(member.joinedTimestamp) });
+      if (wallet) cells.push({ label: 'Backgrounds', value: `${wallet.have}/${wallet.total}` });
+    }
+
+    const png = await renderCard({
+      background: equippedBackground(guildId, user.id),
+      name: member?.displayName || user.globalName || user.username,
+      subtitle: subtitle.join(' · '),
+      avatarUrl: avatar,
+      stats: cells,
+    });
+    files.push(new AttachmentBuilder(png, { name: 'card.png' }));
+    embed.setImage('attachment://card.png');
+  } catch (err) {
+    console.error('Profile card render failed:', err.message);
+  }
+
   return {
     embeds: [embed],
-    components: own ? fillButtons(guildId, user.id) : [],
+    components,
+    files,
+    // The card is re-rendered when a field is filled in; without this the old
+    // card.png stays attached next to the new one.
+    attachments: [],
     allowedMentions: { parse: [] },
   };
 }
