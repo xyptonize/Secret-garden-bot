@@ -341,12 +341,16 @@ async function revealOpen(interaction, userId) {
   await sleep(config.caseRevealMs);
 
   const image = renderBackground(result.bg.id);
-  await interaction.editReply({
-    embeds: [revealEmbed(result)],
-    components: revealButtons(userId, result.bg.id, result.left),
-    files: [file(image, `${result.bg.id}.png`)],
-    attachments: [], // replace the previous pull's picture, don't stack on it
-  });
+  await interaction
+    .editReply({
+      embeds: [revealEmbed(result)],
+      components: revealButtons(userId, result.bg.id, result.left),
+      files: [file(image, `${result.bg.id}.png`)],
+      attachments: [], // replace the previous pull's picture, don't stack on it
+    })
+    // The pull is already theirs; losing the picture must not look like an error
+    // to them, and must not stop a rare pull being announced below.
+    .catch((err) => console.error(`Could not show an unboxing (the pull is saved): ${err.message}`));
 
   // Covert and above: tell the room.
   if (rarityRank(result.bg.rarity) >= BRAG_FROM && interaction.channel) {

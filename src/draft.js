@@ -1406,9 +1406,16 @@ async function handleLobbyAction(interaction) {
       const winner = champion(lobby.bracket);
       const champs = winner != null ? lobby.result.teams[winner] : [];
       const ids = champs.filter((p) => !p.mock).map((p) => p.id);
-      // Champions earn profile-card cases — never from a test lobby, where
-      // nothing else counts either.
-      const cases = winner != null && !lobby.test ? awardChampions(guildId, ids) : 0;
+      // Champions earn profile-card cases — never from a test lobby, and never
+      // twice for the same player: a final can be undone and re-marked as often
+      // as the host likes, which would otherwise print cases on demand.
+      const paid = new Set(lobby.casesPaid || []);
+      const owed = winner != null && !lobby.test ? ids.filter((id) => !paid.has(id)) : [];
+      const cases = owed.length ? awardChampions(guildId, owed) : 0;
+      if (owed.length) {
+        lobby.casesPaid = [...paid, ...owed];
+        store.persist();
+      }
       const gg = champs.map((p) => (p.mock ? nameOf(p) : `<@${p.id}>`)).join(' ');
       const ref = lobby.historyId != null ? ` · tournament **#${lobby.historyId}**` : lobby.test ? ' · 🧪 test, not saved' : '';
       // Built now, not after the await: a "Cancel bracket" landing in between
