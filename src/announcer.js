@@ -5,9 +5,15 @@ import { recordEmbed, recordPoints } from './format.js';
 import { matchesBounty, bountyClaimEmbed, runTime } from './bounty.js';
 import { courseStanding } from './standing.js';
 
-// Players looked up at once. The CS2KZ API slows down under parallel load, so
-// more than 2 in flight pushes requests past the 15s timeout.
+// Record queries are the slow ones (9-14s each), and the API slows further
+// under parallel load, so only a couple run at once. The rating sweep is a
+// different endpoint and answers in milliseconds, so it can go wider.
 const WORKERS = 2;
+const SWEEP_WORKERS = 8;
+// Runs that earn no points (slower than a personal best) don't move a rating,
+// so a few players are fully checked every tick anyway, round robin.
+const BACKSTOP_PER_TICK = 4;
+let backstopAt = 0;
 const MAX_BACKOFF_MS = 10 * 60 * 1000;
 // A bounty waits this many ticks for members whose lookup failed, in case one
 // of them finished first.
@@ -41,7 +47,46 @@ export function startAnnouncer(client) {
   console.log(`📡 Announcer running every ${config.pollIntervalMs / 1000}s.`);
 }
 
-/** Every registered SteamID's newest runs, WORKERS at a time. null = lookup failed. */
+/** Run `job` over `items` with a fixed number of workers. */
+async function pooled(items, workers, job) {
+  const queue = [...items];
+  const run = async () => {
+    for (let item = queue.shift(); item !== undefined; item = queue.shift()) await job(item);
+  };
+  await Promise.all(Array.from({ length: workers }, run));
+}
+
+/**
+ * The cheap question: has anyone's rating moved? One /players lookup each,
+ * milliseconds apiece, so every registered member can be checked every tick.
+ */
+async function sweepRatings(steamIds) {
+  const ratings = new Map(); // steamId -> { ckz, vnl, name } | null when the lookup failed
+  let failed = 0;
+  await pooled(steamIds, SWEEP_WORKERS, async (steamId) => {
+    try {
+      const data = await kz.getPlayer(steamId);
+      ratings.set(steamId, data ? { ckz: data.ckz_rating ?? 0, vnl: data.vnl_rating ?? 0, name: data.name } : null);
+    } catch (err) {
+      failed += 1;
+      console.error(`Rating sweep failed for ${steamId}:`, err.message);
+    }
+  });
+  return { ratings, failed };
+}
+
+/** The players to fully check this tick: the few in the rotation. */
+function backstop(steamIds, count) {
+  const all = [...steamIds];
+  const take = [];
+  for (let i = 0; i < Math.min(count, all.length); i++) {
+    take.push(all[(backstopAt + i) % all.length]);
+  }
+  backstopAt = all.length ? (backstopAt + take.length) % all.length : 0;
+  return take;
+}
+
+/** A player's newest runs, WORKERS at a time. null = lookup failed. */
 async function fetchAll(steamIds) {
   const queue = [...steamIds];
   const recordsBySteam = new Map();
@@ -71,7 +116,25 @@ export async function tick(client) {
   }
   if (steamIds.size === 0) return { total: 0, failed: 0 };
 
-  const { recordsBySteam, failed } = await fetchAll(steamIds);
+  // 1) Cheap sweep: whose rating moved since last tick?
+  const { ratings, failed: sweepFailed } = await sweepRatings([...steamIds]);
+  const moved = new Set();
+  const openBounty = Object.values(guilds).some((g) => (g.bounties || []).some((b) => b.active && !b.claimedBy));
+  for (const g of Object.values(guilds)) {
+    for (const p of Object.values(g.players)) {
+      const now = ratings.get(p.steamId);
+      if (!p.primed) moved.add(p.steamId); // never checked: fetch their history
+      else if (now && (now.ckz !== p.rating?.ckz || now.vnl !== p.rating?.vnl)) moved.add(p.steamId);
+    }
+  }
+  // 2) Only those players get the slow record query — plus a rotating few (runs
+  // that earn no points move no rating), and everyone while a bounty is open,
+  // where "who finished first" has to be exact.
+  const wanted = new Set(moved);
+  for (const id of openBounty ? steamIds : backstop(steamIds, BACKSTOP_PER_TICK)) wanted.add(id);
+
+  const { recordsBySteam, failed: recordsFailed } = await fetchAll(wanted);
+  const failed = sweepFailed + recordsFailed;
   let dirty = false;
 
   for (const g of Object.values(guilds)) {
@@ -97,8 +160,16 @@ export async function tick(client) {
       const records = recordsBySteam.get(player.steamId);
       if (!records) continue;
 
+      // Whatever we just fetched is accounted for: remember the rating that
+      // produced it, so the next sweep only flags real movement.
+      const swept = ratings.get(player.steamId);
+      if (swept && (player.rating?.ckz !== swept.ckz || player.rating?.vnl !== swept.vnl)) {
+        player.rating = { ckz: swept.ckz, vnl: swept.vnl };
+        dirty = true;
+      }
+
       // Keep the cached display name fresh.
-      const latestName = records[0]?.player?.name;
+      const latestName = swept?.name || records[0]?.player?.name;
       if (latestName && player.name !== latestName) {
         player.name = latestName;
         dirty = true;
@@ -167,7 +238,7 @@ export async function tick(client) {
   }
 
   if (dirty) store.persist();
-  return { total: steamIds.size, failed };
+  return { total: steamIds.size, failed, checked: wanted.size };
 }
 
 /**
