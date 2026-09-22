@@ -75,11 +75,28 @@ const pbCache = cached(PB_TTL_MS);
 // The global top by CKZ rating, for "where do I stand among everyone".
 const topCache = cached(10 * 60 * 1000);
 
-/** The highest-rated players, best first, plus how many players exist in total. */
-export async function getTopPlayers({ limit = 1000 } = {}) {
+/**
+ * The highest-rated players, best first, plus how many players exist in total.
+ * The API caps a page at 1000, so this pages until `limit` (3000 reaches about
+ * rating 2,150 — deep enough to place nearly everyone in a normal server).
+ */
+export async function getTopPlayers({ limit = 3000 } = {}) {
   return topCache(`top|${limit}`, async () => {
-    const data = await apiGet('/players', { limit, sort_by: 'ckz-rating', sort_order: 'descending' });
-    return { values: data?.values ?? [], total: data?.total ?? 0 };
+    const values = [];
+    let total = 0;
+    for (let offset = 0; offset < limit; offset += 1000) {
+      const data = await apiGet('/players', {
+        limit: Math.min(1000, limit - offset),
+        offset,
+        sort_by: 'ckz-rating',
+        sort_order: 'descending',
+      });
+      const page = data?.values ?? [];
+      total = data?.total ?? total;
+      values.push(...page);
+      if (page.length < 1000) break; // ran out of players
+    }
+    return { values, total };
   });
 }
 
