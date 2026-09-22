@@ -78,7 +78,7 @@ Every command lives under one parent command, `/sgkz` by default (set `COMMAND_R
 | `/sgkz unfinished <tier> [type] [mode] [user]` | anyone | Courses of a tier (or all) not yet completed. |
 | `/sgkz finished <tier> [type] [mode] [user]` | anyone | Courses of a tier already completed, with times. |
 | `/sgkz maplists [tier] [type] [mode]` | anyone | Every approved CS2KZ map, grouped by tier. |
-| `/sgkz maptop <map> [course] [type] [mode]` | anyone | This server's ranking on one course, with each run's global rank. |
+| `/sgkz maptop <map> [course] [type] [mode]` | anyone | This server's ranking on one course, with each run's global rank. Map and course names **autocomplete** as you type. |
 | `/sgkz bounty list` | anyone | Active and recently claimed bounties. |
 | `/sgkz bounty add <map> <reward> [course] [mode] [type] [note]` | admins | The first registered member to finish the map *after the bounty is posted* wins; if two finish between checks, whoever finished first. No course means the **Main** course. |
 | `/sgkz bounty remove <id>` | admins | Cancel a bounty. |
@@ -211,9 +211,10 @@ Every day at `BIRTHDAY_HOUR` (default 09:00) in `BIRTHDAY_TIMEZONE` (default: th
 - **🔀 Reshuffle** shows another lineup within `DRAFT_RESHUFFLE_TOLERANCE` (1) of the best spread.
 - **✏️ Swap** lets the host trade any two players. Totals update right away and the teams are marked *edited by host*.
 
-**3. Bracket.** The host picks how the first round is paired: **🎲 Bracket — random**, **⚖️ Bracket — by AURA**, or **✋ Bracket — pick matchups**. It's single elimination with one winner.
-- *Random:* random pairings and random byes.
-- *By AURA:* the teams with the closest totals face each other, and with an odd number of teams the weakest (highest total) get the byes.
+**3. Bracket.** The host presses **🏁 Start bracket** and picks how the first round is paired. It's single elimination with one winner.
+- *🥇 Seeded:* strongest meets weakest and the top seeds take the byes, so the best teams meet late (a normal tournament draw).
+- *⚖️ Closest AURA:* the teams with the closest totals face each other; the weakest teams get the byes.
+- *🎲 Random:* random pairings and random byes.
 - *Pick matchups:* the bot asks the host privately for two teams at a time — "choose two teams for match 1 of 2" — until every match is set. Teams left unpaired get the byes, and the host is told how many that will be. **Cancel** drops it; nothing starts until the last pair is chosen. The bracket then shows *matchups picked by the host*.
 - The host clicks **Team X won** for each match, and winners advance automatically. When the final is decided, the bot posts 🏆 and pings the winning team.
 - **↩️ Undo result** reverts the last result. **Cancel bracket** returns to the teams, unlocked. Teams and the roster are locked while a bracket runs.
@@ -236,6 +237,8 @@ Every day at `BIRTHDAY_HOUR` (default 09:00) in `BIRTHDAY_TIMEZONE` (default: th
 **Deleting the lobby message doesn't close it.** If a moderator or a purge bot deletes it, the bot re-posts it. Only the host closes a lobby; deleting the whole channel or thread also ends it.
 
 **Only the host runs the lobby.** Every lobby control (Draft, Reshuffle, Swap, team count, bracket, winners, Undo, Cancel, Close and the host commands) works for the host only, even for members with Manage Server. **Close asks for confirmation.** If the host disappears, an admin passes the lobby on with `/sgdraft host`.
+
+When a champion is decided the bot posts a **recap** that stays in the channel: champions, runner-up, the path through every round, how it was paired, how long it took, and the tournament number to look it up later.
 
 Lobbies are saved to `data/store.json`, so they survive bot restarts. A lobby stays open until the host (or an admin) clicks **Close** or runs `/sgdraft close`, or until its message is deleted. The bot notices deletions, which is why it uses the non-privileged *Guild Messages* intent; no Developer Portal change is needed.
 
@@ -260,11 +263,11 @@ Every `/sgphone` reply is ephemeral, so a number is never posted into a channel.
 
 ## `/sgprofile` — one card per member
 
-`/sgprofile [user]` puts everything the bot knows in one public embed:
+`/sgprofile [user]` puts everything the bot knows in one public embed. On **your own** card, buttons fill in what's missing: **Use my KZ Steam** copies the SteamID you already registered in one click, and the rest open a small form (the birthday form accepts `14/03`, `14 March 1999`, …).
 
 - **💬 Discord** — when they joined the server, when the account was created, whether they're boosting, and their top roles.
 - **🔗 Saved** — birthday (with age when the year is known), Instagram, Steam. A saved phone number only ever shows as *private*, never the number.
-- **🏁 CS2KZ** — their SteamID and Steam link, plus live CKZ/VNL ratings and rank, when they're registered with `/sgkz register`.
+- **🏁 CS2KZ** — their SteamID and Steam link, live CKZ/VNL ratings and rank, and their **global standing** among all CS2KZ players (e.g. `#216 of 127,747`), when they're registered with `/sgkz register`.
 - **🎮 Draft** — their AURA (read from their roles) and their tournament record: played, titles, W–L.
 
 Sections with nothing to show are left out, and a member who has left the server still shows what they saved.
