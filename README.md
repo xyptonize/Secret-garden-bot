@@ -371,7 +371,9 @@ An admin opens a round over a range — say **1 to 500**. The bot announces it w
 | Counted out of turn | *"wrote **99** when the next number was **7**"* |
 | Wrote something that isn't a number | *"wrote something that wasn't a number"* |
 
-Each costs one strike, with a note that takes itself back after a few seconds. On the third, a message that **stays** says they're out of the prize draw: they can keep counting, and their numbers still fill the range, but those numbers can no longer win.
+Each costs one strike, with a note that takes itself back after a few seconds. On the third, a message that **stays** says they're **out of the round**: anything else they post in the channel is removed with a "you can't count any more" reply, and the numbers they already hold can no longer win. Strikes last for the round and reset when the next one opens; `/sgcount forgive` lets someone back in.
+
+Because being struck out stops a member counting, a round can run out of people to fill it. When everyone who has counted is struck out the bot says so in the channel, naming the number it's stuck on, so an admin can `forgive` someone or `close` the round rather than leaving it stuck. New members joining can always count.
 
 **An unlucky draw burns its prize.** The bot draws exactly three times. If one of them is a struck-out member, that place is announced as lost — **💀 UNLUCKY — @them held 237 but struck out 3 times · 50,000₮ goes unclaimed** — and it is *not* passed to anyone else. That round simply has two winners.
 

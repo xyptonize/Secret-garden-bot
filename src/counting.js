@@ -68,6 +68,15 @@ function strike(round, userId, reason, detail = {}) {
   return { strikes: round.strikes[userId].length, out, justOut: !was && out, reason, why: strikeText(entry) };
 }
 
+/**
+ * Everyone who has counted so far is now struck out. New members can still
+ * join in, but the round can no longer rely on the people in it to finish.
+ */
+export function stalled(round) {
+  const counters = new Set(Object.values(round.entries).map((e) => e.by));
+  return counters.size > 0 && [...counters].every((id) => isOut(round, id));
+}
+
 const countOf = (round) => Object.keys(round.entries).length;
 const sizeOf = (round) => round.to - round.from + 1;
 
@@ -86,6 +95,9 @@ export function offerNumber(guildId, { userId, text, bot }) {
   const round = store.getCounting(guildId);
   if (!round || round.status !== 'open') return { ignore: true };
   if (bot) return { ignore: true };
+  // Struck out of this round: they can't claim numbers any more, and there is
+  // nothing left to strike them for.
+  if (isOut(round, userId)) return { blocked: true, next: round.next, strikes: strikesOf(round, userId) };
 
   // Only a bare number is an attempt to count. Anything else is chat, which the
   // caller clears out so the channel stays a clean run of numbers.
@@ -302,18 +314,15 @@ async function strikeNotice(message, result, round, prefix = '') {
     await message.channel
       .send({
         content:
-          `💀 ${who} is **out of the prize draw** — ${config.countStrikes} strikes${why}.\n` +
-          'You can keep counting, but a number of yours can no longer win this round.',
+          `💀 ${who} is **out of this round** — ${config.countStrikes} strikes${why}.\n` +
+          "You can't count any more, and the numbers you already hold can no longer win. " +
+          `An admin can undo it with \`/${config.countRoot} forgive\`.`,
         allowedMentions: { users: [message.author.id] },
       })
       .catch(() => {});
     return;
   }
-  if (result.out) {
-    // Already out: no need to narrate every further slip.
-    if (shouldRemind(message.author.id)) await fleeting(message.channel, `${who} you're out of this round's draw. ${next}`, message.author.id);
-    return;
-  }
+
   await fleeting(
     message.channel,
     `${who} ${prefix || 'Wrong number'}${why} — **strike ${result.strikes}/${config.countStrikes}**. ${next}`,
@@ -340,6 +349,23 @@ export async function onCountingMessage(message, client) {
       bot: message.author?.bot,
     });
     if (result.ignore) return;
+
+    // Out of the round: their message goes, and they are told why — but only
+    // once a minute, or a determined member turns it into a conversation.
+    if (result.blocked) {
+      if (config.countNumbersOnly) await message.delete().catch(() => {});
+      else await message.react('🚫').catch(() => {});
+      if (shouldRemind(message.author.id)) {
+        await fleeting(
+          message.channel,
+          `🚫 <@${message.author.id}> you're **out of this round** — ${result.strikes} strikes. You can't count any more, ` +
+            `and your numbers can't win. An admin can undo it with \`/${config.countRoot} forgive\`.`,
+          message.author.id,
+          12000,
+        );
+      }
+      return;
+    }
 
     // Anything that isn't a number: the channel is for counting only.
     if (result.chat) {
@@ -372,6 +398,19 @@ export async function onCountingMessage(message, client) {
     if (result.refused) await fleeting(message.channel, `<@${message.author.id}> ${result.message}`, message.author.id, 10000);
 
     await strikeNotice(message, result, round);
+
+    // A round whose counters have all struck out will sit there untouched
+    // until somebody notices. Somebody should be told.
+    if (result.justOut && stalled(round)) {
+      await message.channel
+        .send({
+          content:
+            `⚠️ **Everyone who has counted is now struck out**, so nobody left in this round can take ` +
+            `**${number(round.next)}**. New members can still count — otherwise an admin can use ` +
+            `\`/${config.countRoot} forgive\` to let someone back in, or \`/${config.countRoot} close\` to draw now.`,
+        })
+        .catch(() => {});
+    }
   } catch (err) {
     console.error('Counting message failed:', err.message);
   }
@@ -460,7 +499,9 @@ async function cmdOpen(interaction) {
               config.countStrikes
                 ? `• **${config.countStrikes} strikes and you're out** — a wrong number${config.countChatStrikes ? ', or writing anything that isn\'t a number,' : ''} costs one. That includes being beaten to a number by someone faster, so read before you type.`
                 : null,
-              config.countStrikes ? '• Struck out? You can still count, but your numbers can no longer win — and if one is drawn, that prize is lost, not passed on.' : null,
+              config.countStrikes
+                ? '• Struck out? You\'re done for this round — you can\'t count, and if a number you already hold is drawn, that prize is lost rather than passed on.'
+                : null,
               config.countNoDouble ? '• You can\'t take two in a row' : null,
               `• When **${number(to)}** is reached, three of you win — drawn 3rd, 2nd, then 1st`,
               `• Every number you hold is a ticket, so counting more often is worth more`,
@@ -489,11 +530,12 @@ function statusEmbed(round, userId) {
         `Next number: **${number(round.next)}** in <#${round.channelId}>`,
         `\`${bar}\` ${done}% — ${number(claimed)} of ${number(size)} claimed`,
         `**${number(size - claimed)}** to go before the draw.`,
+        stalled(round) ? '⚠️ Everyone who has counted is struck out — an admin needs to `forgive` someone or `close` the round.' : null,
         '',
         `You hold **${mine.length}** number(s) · **${Math.max(0, config.countDailyLimit - claimedToday(round, userId))}** left today`,
         config.countStrikes
           ? isOut(round, userId)
-            ? `💀 You are **out of the prize draw** — ${strikesOf(round, userId)} strikes.`
+            ? `💀 You are **out of this round** — ${strikesOf(round, userId)} strikes. You can't count or win.`
             : `Strikes: **${strikesOf(round, userId)}/${config.countStrikes}**`
           : null,
       ]
@@ -587,7 +629,7 @@ async function cmdStrikes(interaction) {
         .setColor(GOLD)
         .setTitle('⚠️ Strikes')
         .setDescription(lines.join('\n'))
-        .setFooter({ text: `${config.countStrikes} strikes and a number of yours can no longer win · wrong numbers only` }),
+        .setFooter({ text: `${config.countStrikes} strikes and you're out of the round — no counting, no prize` }),
     ],
     allowedMentions: { parse: [] },
   });
