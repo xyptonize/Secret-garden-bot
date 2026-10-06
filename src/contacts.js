@@ -3,8 +3,9 @@
 // Both work like the birthdays: members save their own, and can remove it again.
 // The difference is who may look:
 //   /sgig    — public. Anyone can view a handle or list everyone's.
-//   /sgphone — private. Only the member themselves and Manage-Server admins can
-//              see a number, and every reply is ephemeral. There is no public list.
+//   /sgphone — private. Only the member themselves and the roles named in
+//              PHONE_ROLES (plus the server owner) can see a number, and every
+//              reply is ephemeral. There is no public list.
 //
 // Saved in data/store.json under guild.contacts.{ig,phone}.
 
@@ -20,6 +21,34 @@ const ephemeral = (interaction, content) =>
   interaction.reply({ flags: MessageFlags.Ephemeral, content, allowedMentions: { parse: [] } });
 
 const isAdmin = (interaction) => Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild));
+
+/** The member's roles, whichever shape the interaction handed us. */
+function rolesOf(interaction) {
+  const roles = interaction.member?.roles;
+  if (!roles) return [];
+  if (Array.isArray(roles)) return roles.map((r) => ({ id: typeof r === 'string' ? r : r.id, name: r.name ?? '' }));
+  if (roles.cache) return [...roles.cache.values()].map((r) => ({ id: r.id, name: r.name }));
+  return [];
+}
+
+/**
+ * Who may look at someone else's private contact. PHONE_ROLES names the roles
+ * that may — exactly those, not everyone holding Manage Server, which in a
+ * server with a dozen moderator and bot roles is far more people than intended.
+ * The server owner always may.
+ */
+function canSeePrivate(interaction) {
+  if (!config.phoneRoles.length) return isAdmin(interaction);
+  if (interaction.guild?.ownerId && interaction.guild.ownerId === interaction.user.id) return true;
+  const wanted = config.phoneRoles.map((r) => r.toLowerCase());
+  return rolesOf(interaction).some((r) => wanted.includes(r.id) || wanted.includes((r.name || '').toLowerCase()));
+}
+
+/** Named in a refusal, so people know who to ask rather than guessing. */
+const whoCanSee = () =>
+  config.phoneRoles.length
+    ? config.phoneRoles.map((r) => (/^\d{5,}$/.test(r) ? `<@&${r}>` : `**${r}**`)).join(', ')
+    : 'admins';
 
 // ---------------------------------------------------------------------------
 // Parsing
@@ -118,8 +147,8 @@ function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, 
   async function view(interaction) {
     const target = interaction.options.getUser('user') || interaction.user;
     const self = target.id === interaction.user.id;
-    if (isPrivate && !self && !isAdmin(interaction)) {
-      return ephemeral(interaction, `🔒 Only admins can look up someone else's ${label}.`);
+    if (isPrivate && !self && !canSeePrivate(interaction)) {
+      return ephemeral(interaction, `🔒 Only ${whoCanSee()} can look up someone else's ${label}.`);
     }
     const value = store.getContacts(interaction.guildId, kind)[target.id];
     if (!value) {
@@ -145,8 +174,8 @@ function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, 
   }
 
   async function list(interaction) {
-    if (isPrivate && !isAdmin(interaction)) {
-      return ephemeral(interaction, `🔒 ${plural} are private — only admins can list them.`);
+    if (isPrivate && !canSeePrivate(interaction)) {
+      return ephemeral(interaction, `🔒 ${plural} are private — only ${whoCanSee()} can list them.`);
     }
     const all = Object.entries(store.getContacts(interaction.guildId, kind));
     if (!all.length) {
@@ -199,7 +228,7 @@ function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, 
         .addUserOption((o) => o.setName('user').setDescription("(Admin) Remove someone else's")),
     )
     .addSubcommand((s) =>
-      s.setName('list').setDescription(isPrivate ? `(Admin) Everyone's ${label}.` : `Everyone's ${label}.`),
+      s.setName('list').setDescription(isPrivate ? `(Restricted) Everyone's ${label}.` : `Everyone's ${label}.`),
     );
 
   return {

@@ -177,6 +177,7 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `DRAFT_DEFAULT_AURA` | — | `5.5` | AURA for players with no AURA role. |
 | `DRAFT_STICKY_SECONDS` | — | `5` | Keep open lobbies at the bottom of their channel: re-post after this many quiet seconds (0 = off). |
 | `DRAFT_RESHUFFLE_TOLERANCE` | — | `1` | How far from the best split a Reshuffle may go. |
+| `PHONE_ROLES` | — | — | Roles (names or ids, comma separated) allowed to see and list phone numbers. The server owner always can. Unset = anyone with Manage Server. |
 | `CASE_COMMAND_ROOT` | — | `sgcase` | Parent command for the card/case commands. |
 | `CASE_DAILY_SEEDS` | — | `25` | Seeds paid with the free daily case. |
 | `CASE_STREAK_SEEDS` | — | `5` | Extra seeds per consecutive daily claim… |
@@ -285,11 +286,13 @@ Members save their own; `/sgig` is public, `/sgphone` is private.
 | `/sgig list` | anyone | Everyone's handles. |
 | `/sgig remove [user]` | anyone / admins | Remove yours; admins can remove anyone's. |
 | `/sgphone set <value>` | anyone | Save your number. Accepts 8 digits (`9911 2233` → `+976 9911 2233`), `+976…`, `00976…` or any international `+…` number. |
-| `/sgphone view [user]` | you / admins | **Private reply.** Only you can see your own; only admins can look up someone else's. |
-| `/sgphone list` | admins | **Private reply.** Everyone's numbers. Members get "🔒 Phone numbers are private". |
+| `/sgphone view [user]` | you / `PHONE_ROLES` | **Private reply.** Only you can see your own; only the allowed roles can look up someone else's. |
+| `/sgphone list` | `PHONE_ROLES` | **Private reply.** Everyone's numbers. Anyone else gets "🔒 Phone numbers are private — only @OWNER👻, @Discord Developer, @Developer can list them". |
 | `/sgphone remove [user]` | anyone / admins | Remove yours; admins can remove anyone's. |
 | `/sgsteam set <value>` | anyone | Save your Steam profile. Accepts a `steamcommunity.com/id/…` or `/profiles/…` link, a SteamID64, `STEAM_1:0:…` or `[U:1:…]`. |
 | `/sgsteam view [user]` / `list` / `remove [user]` | anyone | Same as `/sgig`, public. |
+
+**Who can see a number** is set by `PHONE_ROLES` in `.env` — role names or ids, comma separated — plus the server owner, who always can. It is currently **OWNER👻, Discord Developer, Developer**. This is deliberately narrower than "admins": Manage Server is held by six member roles here and a dozen bot integrations, which is far more people than should see a phone list. Leaving `PHONE_ROLES` unset falls back to anyone with Manage Server.
 
 Every `/sgphone` reply is ephemeral, so a number is never posted into a channel. Numbers and handles live in `data/store.json` (mode 600, owner tengis.g) and are included in the daily backup. Set `PHONE_COUNTRY_CODE` / `PHONE_LOCAL_DIGITS` in `.env` for another country (defaults `+976` and 8).
 

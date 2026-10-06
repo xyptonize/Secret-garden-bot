@@ -49,6 +49,13 @@ export const config = {
   profileRoot: rootName(process.env.PROFILE_COMMAND_ROOT, 'sgprofile'),
   phoneCountry: (process.env.PHONE_COUNTRY_CODE || '+976').trim(), // local numbers get this prefix
   phoneLocalDigits: Math.max(4, numberOr(process.env.PHONE_LOCAL_DIGITS, 8)),
+  // Who may see someone else's phone number. Role names or ids, comma separated.
+  // The server owner always can. Unset falls back to anyone with Manage Server,
+  // which in a busy server is a much wider net than it sounds.
+  phoneRoles: (process.env.PHONE_ROLES || '')
+    .split(',')
+    .map((r) => r.trim())
+    .filter(Boolean),
   // Profile-card backgrounds, unboxed from cases like CS2 skins.
   caseRoot: rootName(process.env.CASE_COMMAND_ROOT, 'sgcase'),
   caseDailySeeds: Math.max(0, numberOr(process.env.CASE_DAILY_SEEDS, 25)), // free seeds with the daily case
