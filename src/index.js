@@ -16,6 +16,7 @@ import {
 import { contactCommands } from './contacts.js';
 import { caseCommands, isCaseComponent, handleCaseComponent, handleCaseAutocomplete } from './cases.js';
 import { countCommands, onCountingMessage, onCountingDelete } from './counting.js';
+import { alarmCommands, handleAlarmAutocomplete, startAlarms } from './alarms.js';
 import {
   casinoCommands,
   isCasinoComponent,
@@ -33,7 +34,7 @@ store.load();
 refundInterruptedGames();
 
 // One router for every sg*** command root (/sgkz, /sghb, …).
-const commands = { ...kzCommands, ...birthdayCommands, ...draftCommands, ...contactCommands, ...profileCommands, ...caseCommands, ...casinoCommands, ...countCommands };
+const commands = { ...kzCommands, ...birthdayCommands, ...draftCommands, ...contactCommands, ...profileCommands, ...caseCommands, ...casinoCommands, ...countCommands, ...alarmCommands };
 
 /**
  * /sgcount has to read the numbers people type, which needs the Message Content
@@ -107,6 +108,7 @@ client.once(Events.ClientReady, (c) => {
   startAnnouncer(client);
   startLeaderboardUpdater(client);
   startBirthdayScheduler(client);
+  startAlarms(client);
   reconcileLobbies(client).catch((err) => console.error('Draft lobby reconcile failed:', err.message));
   // Warm the map list so the first autocomplete after a restart is instant.
   kzApi.getAllMaps().catch((err) => console.error('Could not pre-load the map list:', err.message));
@@ -118,6 +120,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     try {
       if (interaction.commandName === config.caseRoot) await handleCaseAutocomplete(interaction);
       else if (interaction.commandName === config.casinoRoot) await handleCasinoAutocomplete(interaction);
+      else if (interaction.commandName === config.alarmRoot) await handleAlarmAutocomplete(interaction);
       else await handleAutocomplete(interaction);
     } catch (err) {
       console.error('Autocomplete failed:', err.message);

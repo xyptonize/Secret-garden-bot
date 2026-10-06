@@ -12,6 +12,7 @@ The Secret Garden Discord bot. Each feature has its own `sg***` command root:
 | `/sgcase` | Profile-card backgrounds, unboxed like CS2 skins |
 | `/sgcasino` | Wager seeds — fair-odds games, duels and draft-match betting |
 | `/sgcount` | Counting draw — count up together, three members win |
+| `/sgalarm` | Reminders, delivered in the channel **and** by DM |
 
 ## CS2KZ (`/sgkz`)
 
@@ -177,6 +178,11 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `DRAFT_DEFAULT_AURA` | — | `5.5` | AURA for players with no AURA role. |
 | `DRAFT_STICKY_SECONDS` | — | `5` | Keep open lobbies at the bottom of their channel: re-post after this many quiet seconds (0 = off). |
 | `DRAFT_RESHUFFLE_TOLERANCE` | — | `1` | How far from the best split a Reshuffle may go. |
+| `ALARM_COMMAND_ROOT` | — | `sgalarm` | Parent command for reminders. |
+| `ALARM_TIMEZONE` | — | `BIRTHDAY_TIMEZONE` | Timezone that `21:00` and friends are read in. |
+| `ALARM_MAX_PER_MEMBER` | — | `25` | Alarms one member may have waiting. |
+| `ALARM_MIN_SECONDS` | — | `60` | The soonest an alarm may be set for. |
+| `ALARM_CHECK_SECONDS` | — | `20` | How often due alarms are looked for. |
 | `STAFF_ROLES` | — | — | Roles (names or ids) that may override the ordinary rules — currently taking over a `/sgdraft` lobby from an active host. The server owner always can. Unset = anyone with Manage Server. |
 | `PHONE_ROLES` | — | — | Roles (names or ids, comma separated) allowed to see and list phone numbers. The server owner always can. Unset = anyone with Manage Server. |
 | `CASE_COMMAND_ROOT` | — | `sgcase` | Parent command for the card/case commands. |
@@ -409,6 +415,26 @@ When the last number is claimed the bot draws **three different members** and re
 Prizes are free text (`100,000₮`), so the bot announces and records them but never handles money. The full ledger of **who held which number** is kept forever in `data/count-history.json` alongside the winners, so any draw can be audited afterwards. Winners are drawn with a cryptographic random source, and the result is written to that file **before** it is announced.
 
 > **Requires the Message Content privilege.** Reading typed numbers needs it, and it is a switch only the application owner can flip: <https://discord.com/developers/applications> → the app → **Bot** → **Privileged Gateway Intents** → **Message Content Intent**. The bot checks for the privilege at startup and only asks the gateway for it when it has been granted — so it keeps running normally without it, logging a warning, and `/sgcount` starts working the moment the switch is on and the bot is restarted.
+
+## Reminders (`/sgalarm`)
+
+`/sgalarm set when:<time> [about] [repeat] [channel]` — the bot posts in the channel **and** DMs the member. Both, deliberately: a channel can be deleted and DMs can be closed, and neither should be why somebody misses what they asked to be reminded of. If the DM fails the channel message says so.
+
+Times are read in `ALARM_TIMEZONE` (the server's own), and understood as:
+
+| Typed | Means |
+|---|---|
+| `30m` · `2h` · `1h30m` · `3d` · `2 weeks` · `in 45 minutes` | that long from now |
+| `21:00` · `9pm` | today, or tomorrow if that time has passed |
+| `today 09:00` · `tomorrow 21:00` | that day |
+| `25/12 18:00` · `25.12` | that date this year, or next if it has passed |
+| `2027-03-14 21:00` | exactly that |
+
+Anything else is refused with examples rather than guessed at — `-5m`, `2h meeting` and `5 bananas` all get turned away.
+
+`repeat` can be **daily** or **weekly**. A repeating alarm that was missed while the bot was down rings **once** and then skips to its next future occurrence, so a week offline doesn't produce seven copies; anything more than an hour late says so. Other commands: `/sgalarm list [user]`, `/sgalarm cancel <id>` (with autocomplete over your own), `/sgalarm clear`. Up to `ALARM_MAX_PER_MEMBER` (25) waiting at once, no sooner than a minute ahead and no further than a year.
+
+The alarm is rescheduled and written to disk **before** it is sent, so a crash mid-delivery can lose a message but can never ring the same alarm twice.
 
 ## Backups and service
 

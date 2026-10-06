@@ -66,6 +66,13 @@ export const config = {
   caseDropDailyCap: Math.max(0, numberOr(process.env.CASE_DROP_DAILY_CAP, 3)), // playing drops per member per day
   caseChampionCases: Math.max(0, numberOr(process.env.CASE_CHAMPION_CASES, 1)), // to each player on the winning team
   caseRevealMs: Math.max(0, numberOr(process.env.CASE_REVEAL_MS, 900)), // pause between unboxing frames
+  // Reminders — /sgalarm. Times are read in this timezone, and every alarm is
+  // delivered both in the channel it was set in and by DM.
+  alarmRoot: rootName(process.env.ALARM_COMMAND_ROOT, 'sgalarm'),
+  alarmTimeZone: process.env.ALARM_TIMEZONE?.trim() || process.env.BIRTHDAY_TIMEZONE?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone,
+  alarmMaxPer: Math.max(1, numberOr(process.env.ALARM_MAX_PER_MEMBER, 25)), // alarms one member may have waiting
+  alarmMinSeconds: Math.max(10, numberOr(process.env.ALARM_MIN_SECONDS, 60)), // the soonest an alarm may be set for
+  alarmCheckSeconds: Math.max(5, numberOr(process.env.ALARM_CHECK_SECONDS, 20)),
   // Owners and developers: the few who can override the ordinary rules, such as
   // taking over a draft lobby from its host. Role names or ids, comma separated.
   // Unset falls back to anyone with Manage Server.

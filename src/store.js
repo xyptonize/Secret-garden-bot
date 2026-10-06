@@ -262,6 +262,19 @@ export function removeContact(guildId, kind, discordId) {
   return existed;
 }
 
+// --- Reminders: guild.alarms = [{ id, userId, channelId, at, message, repeat }] ---
+
+export function getAlarms(guildId) {
+  const g = guild(guildId);
+  if (!g.alarms) g.alarms = [];
+  return g.alarms;
+}
+
+export function setAlarms(guildId, alarms) {
+  guild(guildId).alarms = alarms;
+  persist();
+}
+
 // --- Counting draws: guild.counting holds the open round; finished rounds and
 // their winners are kept forever in data/count-history.json ---
 
