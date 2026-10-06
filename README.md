@@ -13,6 +13,7 @@ The Secret Garden Discord bot. Each feature has its own `sg***` command root:
 | `/sgcasino` | Wager seeds — fair-odds games, duels and draft-match betting |
 | `/sgcount` | Counting draw — count up together, three members win |
 | `/sgalarm` | Reminders, delivered in the channel **and** by DM |
+| `/sghelp` | What each command does, in detail |
 
 ## CS2KZ (`/sgkz`)
 
@@ -437,6 +438,14 @@ Anything else is refused with examples rather than guessed at — `-5m`, `2h mee
 `repeat` can be **daily** or **weekly**. A repeating alarm that was missed while the bot was down rings **once** and then skips to its next future occurrence, so a week offline doesn't produce seven copies; anything more than an hour late says so. Other commands: `/sgalarm list [user]`, `/sgalarm cancel <id>` (with autocomplete over your own), `/sgalarm clear`. Up to `ALARM_MAX_PER_MEMBER` (25) waiting at once, no sooner than a minute ahead and no further than a year.
 
 The alarm is rescheduled and written to disk **before** it is sent, so a crash mid-delivery can lose a message but can never ring the same alarm twice.
+
+## Help (`/sghelp`)
+
+`/sghelp` on its own lists every command root. `/sghelp sgdraft` (or `draft`, `teams`, `drafter` — there are aliases, and it autocompletes) explains that one properly: what it is for, how a night with it actually runs, the rules that surprise people, and then **every subcommand with its options**.
+
+That last part is generated from the real slash-command definitions rather than written out, so the command list in the help can never drift from what is actually registered. The prose above it is written by hand, because "what happens when two people type the same number" is not something a command definition can tell you.
+
+Replies are private unless you pass `public: true`.
 
 ## Backups and service
 

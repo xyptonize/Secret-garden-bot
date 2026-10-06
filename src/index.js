@@ -17,6 +17,7 @@ import { contactCommands } from './contacts.js';
 import { caseCommands, isCaseComponent, handleCaseComponent, handleCaseAutocomplete } from './cases.js';
 import { countCommands, onCountingMessage, onCountingDelete } from './counting.js';
 import { alarmCommands, handleAlarmAutocomplete, startAlarms } from './alarms.js';
+import { helpCommands, handleHelpAutocomplete } from './help.js';
 import {
   casinoCommands,
   isCasinoComponent,
@@ -34,7 +35,7 @@ store.load();
 refundInterruptedGames();
 
 // One router for every sg*** command root (/sgkz, /sghb, …).
-const commands = { ...kzCommands, ...birthdayCommands, ...draftCommands, ...contactCommands, ...profileCommands, ...caseCommands, ...casinoCommands, ...countCommands, ...alarmCommands };
+const commands = { ...kzCommands, ...birthdayCommands, ...draftCommands, ...contactCommands, ...profileCommands, ...caseCommands, ...casinoCommands, ...countCommands, ...alarmCommands, ...helpCommands };
 
 /**
  * /sgcount has to read the numbers people type, which needs the Message Content
@@ -121,6 +122,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.commandName === config.caseRoot) await handleCaseAutocomplete(interaction);
       else if (interaction.commandName === config.casinoRoot) await handleCasinoAutocomplete(interaction);
       else if (interaction.commandName === config.alarmRoot) await handleAlarmAutocomplete(interaction);
+      else if (interaction.commandName === 'sghelp') await handleHelpAutocomplete(interaction);
       else await handleAutocomplete(interaction);
     } catch (err) {
       console.error('Autocomplete failed:', err.message);

@@ -2100,7 +2100,7 @@ const rootBuilder = new SlashCommandBuilder()
   .addSubcommand((s) =>
     s
       .setName('host')
-      .setDescription("Hand this channel's lobby to another host (the host, or an admin if the host is gone).")
+      .setDescription("Hand this channel's lobby to another host (owners and developers can take one over).")
       .addUserOption((o) => o.setName('user').setDescription('New host').setRequired(true)),
   )
   .addSubcommand((s) =>

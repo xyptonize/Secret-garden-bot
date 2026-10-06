@@ -11,6 +11,7 @@ import { caseCommandData } from './cases.js';
 import { casinoCommandData } from './casino.js';
 import { countCommandData } from './counting.js';
 import { alarmCommandData } from './alarms.js';
+import { helpCommandData } from './help.js';
 
 const body = [
   ...commandData(),
@@ -22,6 +23,7 @@ const body = [
   ...casinoCommandData(),
   ...countCommandData(),
   ...alarmCommandData(),
+  ...helpCommandData(),
 ];
 const rest = new REST({ version: '10' }).setToken(config.token);
 
