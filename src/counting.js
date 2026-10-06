@@ -20,6 +20,11 @@ const GOLD = 0xf1c40f;
 const GREY = 0x9aa0a6;
 
 const warnedCannotDelete = new Set(); // one log line per channel, not per message
+
+// The message id behind each counted number, so the bot can notice if something
+// else removes one. Bounded: this is a detector, not a record.
+const claimedMessages = new Map(); // messageId -> { guildId, roundId, value }
+let warnedDeletions = 0;
 const sleep = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
 const isAdmin = (interaction) => Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild));
 const ephemeral = (interaction, content) => interaction.reply({ flags: MessageFlags.Ephemeral, content });
@@ -308,6 +313,33 @@ export async function announceDraw(channel, record) {
 // The message hook
 // ---------------------------------------------------------------------------
 
+/**
+ * A counted message was deleted by something that isn't this bot. That is how a
+ * second counting bot in the same channel shows up: the numbers are gone from
+ * the channel while the count has already moved on, so nobody can see what to
+ * type next and everyone collects strikes for guessing.
+ */
+export async function onCountingDelete(messageId, client) {
+  const claim = claimedMessages.get(messageId);
+  if (!claim) return;
+  claimedMessages.delete(messageId);
+  const round = store.getCounting(claim.guildId);
+  if (!round || round.id !== claim.roundId) return;
+  if (warnedDeletions >= 3) return; // say it a few times, then stop nagging
+  warnedDeletions += 1;
+
+  const channel = await client?.channels?.fetch(round.channelId).catch(() => null);
+  if (!channel) return;
+  await channel
+    .send({
+      content:
+        `⚠️ **Something deleted number ${number(claim.value)} after it was counted.** It still counts — the next number is ` +
+        `**${number(round.next)}**. If another bot is set up in this channel it will keep removing numbers and nobody will be ` +
+        `able to see where the count is; give the count a channel of its own, or remove that bot's access here.`,
+    })
+    .catch(() => {});
+}
+
 /** Lock the channel behind a finished round, and say so. */
 async function closeChannelAfterRound(channel, client) {
   const locked = await setChannelOpen(channel, false, client);
@@ -335,12 +367,18 @@ function shouldRemind(userId) {
   return true;
 }
 
-/** Say something in the channel and take it back a few seconds later. */
-async function fleeting(channel, content, userId, ms = 8000) {
+/**
+ * Say something to a member in the channel. By default it stays: these notes
+ * carry strikes, and a strike nobody read is a strike nobody can learn from.
+ * COUNT_NOTICE_SECONDS makes them clean themselves up instead.
+ */
+async function fleeting(channel, content, userId) {
   const sent = await channel
     .send({ content, allowedMentions: { users: userId ? [userId] : [] } })
     .catch(() => null);
-  if (sent) setTimeout(() => sent.delete().catch(() => {}), ms);
+  if (sent && config.countNoticeSeconds) {
+    setTimeout(() => sent.delete().catch(() => {}), config.countNoticeSeconds * 1000);
+  }
 }
 
 /**
@@ -406,7 +444,6 @@ export async function onCountingMessage(message, client) {
           `🚫 <@${message.author.id}> you're **out of this round** — ${result.strikes} strikes. You can't count any more, ` +
             `and your numbers can't win. An admin can undo it with \`/${config.countRoot} forgive\`.`,
           message.author.id,
-          12000,
         );
       }
       return;
@@ -431,6 +468,8 @@ export async function onCountingMessage(message, client) {
       // Settled first, reacted second: nothing may come between claiming the
       // last number and the round being drawn.
       const settled = result.filled ? settleRound(message.guildId, result.round) : null;
+      if (claimedMessages.size > 200) claimedMessages.clear();
+      claimedMessages.set(message.id, { guildId: message.guildId, roundId: round.id, value: result.value });
       await message.react('✅').catch(() => {});
       if (settled) {
         await announceDraw(message.channel, settled.record).catch((err) => console.error('Draw announcement failed:', err.message));
@@ -449,7 +488,7 @@ export async function onCountingMessage(message, client) {
       );
       return;
     }
-    if (result.refused) await fleeting(message.channel, `<@${message.author.id}> ${result.message}`, message.author.id, 10000);
+    if (result.refused) await fleeting(message.channel, `<@${message.author.id}> ${result.message}`, message.author.id);
 
     await strikeNotice(message, result, round);
 
@@ -547,6 +586,8 @@ async function cmdOpen(interaction) {
   };
   store.persistCountHistory();
   store.setCounting(interaction.guildId, round);
+  claimedMessages.clear();
+  warnedDeletions = 0;
 
   // The channel is only open while a round is running.
   const opened = await setChannelOpen(channel, true, interaction.client);

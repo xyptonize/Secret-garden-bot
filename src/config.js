@@ -89,6 +89,10 @@ export const config = {
   countNumbersOnly: (process.env.COUNT_NUMBERS_ONLY || 'true').toLowerCase() !== 'false', // delete chat in the counting channel
   countDeleteWrong: (process.env.COUNT_DELETE_WRONG || 'false').toLowerCase() === 'true', // also delete wrong numbers
   countWeighted: (process.env.COUNT_WEIGHTED || 'true').toLowerCase() !== 'false', // each number is a ticket
+  // How long the bot's own notes (strikes, refusals) stay before it tidies them
+  // away. 0 keeps them: a "strike 2/3" that vanishes in eight seconds is one the
+  // member never read.
+  countNoticeSeconds: Math.max(0, numberOr(process.env.COUNT_NOTICE_SECONDS, 0)),
   countLockChannel: (process.env.COUNT_LOCK_CHANNEL || 'true').toLowerCase() !== 'false', // close the channel between rounds
   countRevealMs: Math.max(0, numberOr(process.env.COUNT_REVEAL_MS, 2500)), // pause between the three winners
   // The day boundary for daily claims and drop caps — the server's own day.

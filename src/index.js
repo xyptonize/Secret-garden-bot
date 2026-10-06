@@ -15,7 +15,7 @@ import {
 } from './draft.js';
 import { contactCommands } from './contacts.js';
 import { caseCommands, isCaseComponent, handleCaseComponent, handleCaseAutocomplete } from './cases.js';
-import { countCommands, onCountingMessage } from './counting.js';
+import { countCommands, onCountingMessage, onCountingDelete } from './counting.js';
 import {
   casinoCommands,
   isCasinoComponent,
@@ -77,8 +77,16 @@ const client = new Client({
 
 // A deleted lobby message is re-posted (only the host closes a lobby). A deleted
 // channel/thread ends its lobbies. Channel deletes send no per-message events.
-client.on(Events.MessageDelete, (message) => repostDeletedLobby(message.id, client));
-client.on(Events.MessageBulkDelete, (messages) => messages.forEach((m) => repostDeletedLobby(m.id, client)));
+client.on(Events.MessageDelete, (message) => {
+  repostDeletedLobby(message.id, client);
+  onCountingDelete(message.id, client);
+});
+client.on(Events.MessageBulkDelete, (messages) =>
+  messages.forEach((m) => {
+    repostDeletedLobby(m.id, client);
+    onCountingDelete(m.id, client);
+  }),
+);
 // Chat in a lobby's channel: move the lobby back to the bottom.
 client.on(Events.MessageCreate, (message) => {
   onChannelMessage(message);
