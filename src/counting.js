@@ -37,17 +37,35 @@ function claimedToday(round, userId) {
   return n;
 }
 
-/** Strikes against one member this round, and whether that puts them out. */
-export const strikesOf = (round, userId) => round.strikes?.[userId] || 0;
+/**
+ * Why a strike was given. Members deserve to know which mistake cost them, and
+ * "you were too slow" is a very different thing from "you weren't counting".
+ */
+export const STRIKE_REASONS = {
+  late: (d) => `**${number(d.got)}** was already taken — someone got there first`,
+  skip: (d) => `wrote **${number(d.got)}** when the next number was **${number(d.expected)}**`,
+  chat: () => 'wrote something that wasn\'t a number',
+};
+export const strikeText = (s) => (STRIKE_REASONS[s.reason] || (() => s.reason))(s);
+
+/** Every strike against one member this round, oldest first. */
+export const strikeList = (round, userId) => {
+  const held = round.strikes?.[userId];
+  return Array.isArray(held) ? held : [];
+};
+export const strikesOf = (round, userId) => strikeList(round, userId).length;
 export const isOut = (round, userId) => config.countStrikes > 0 && strikesOf(round, userId) >= config.countStrikes;
 
-/** Add a strike. Returns the new total and whether it was the one that did it. */
-function strike(round, userId) {
+/** Add a strike, with the reason it was given. */
+function strike(round, userId, reason, detail = {}) {
   if (!config.countStrikes) return { strikes: 0, out: false };
   if (!round.strikes) round.strikes = {};
+  if (!Array.isArray(round.strikes[userId])) round.strikes[userId] = [];
   const was = isOut(round, userId);
-  round.strikes[userId] = strikesOf(round, userId) + 1;
-  return { strikes: round.strikes[userId], out: isOut(round, userId), justOut: !was && isOut(round, userId) };
+  const entry = { reason, at: new Date().toISOString(), ...detail };
+  round.strikes[userId].push(entry);
+  const out = isOut(round, userId);
+  return { strikes: round.strikes[userId].length, out, justOut: !was && out, reason, why: strikeText(entry) };
 }
 
 const countOf = (round) => Object.keys(round.entries).length;
@@ -74,14 +92,17 @@ export function offerNumber(guildId, { userId, text, bot }) {
   const cleaned = String(text ?? '').trim().replace(/[,\s_]/g, '');
   if (!/^\d{1,15}$/.test(cleaned)) {
     if (!config.countChatStrikes) return { chat: true };
-    const s = strike(round, userId);
+    const s = strike(round, userId, 'chat', { text: String(text ?? '').slice(0, 60) });
     store.setCounting(guildId, round);
     return { chat: true, ...s };
   }
   const value = Number(cleaned);
 
   if (value !== round.next) {
-    const s = strike(round, userId);
+    // Behind the count is the connection-lag case: the number was already
+    // claimed while their message was in flight. Ahead of it is not counting.
+    const reason = value < round.next ? 'late' : 'skip';
+    const s = strike(round, userId, reason, { got: value, expected: round.next });
     store.setCounting(guildId, round);
     return { wrong: true, expected: round.next, got: value, ...s };
   }
@@ -119,29 +140,27 @@ export function offerNumber(guildId, { userId, text, bot }) {
  * ticket by default, so counting more often is worth more — set COUNT_WEIGHTED
  * to false for one entry per member however many they claimed.
  *
- * They come out in the order they are drawn, and the caller reveals them
- * backwards: the last one drawn takes first place.
+ * Three draws, no more: a member who has struck out can still be drawn, and
+ * when they are, that prize is simply not given — it does not roll on to
+ * somebody else. Picks come back in the order they were drawn, and the first
+ * one drawn takes third place.
  */
 export function drawWinners(round, { weighted = config.countWeighted } = {}) {
   const tickets = Object.entries(round.entries).map(([n, e]) => ({ n: Number(n), by: e.by }));
-  if (!tickets.length) return { drawn: [], unlucky: [] };
+  if (!tickets.length) return [];
 
   const pool = weighted
     ? tickets
     : [...new Set(tickets.map((t) => t.by))].map((by) => tickets.find((t) => t.by === by));
 
-  const drawn = [];
-  const unlucky = [];
+  const picks = [];
   let left = pool;
-  while (drawn.length < 3 && left.length) {
+  while (picks.length < 3 && left.length) {
     const pick = left[randomInt(0, left.length)];
-    // Struck out: their number still comes out of the hat, they just can't take
-    // the prize. Everyone gets to see it happen.
-    if (isOut(round, pick.by)) unlucky.push(pick);
-    else drawn.push(pick);
+    picks.push({ ...pick, out: isOut(round, pick.by) });
     left = left.filter((t) => t.by !== pick.by); // one result per member
   }
-  return { drawn, unlucky };
+  return picks;
 }
 
 /**
@@ -150,14 +169,20 @@ export function drawWinners(round, { weighted = config.countWeighted } = {}) {
  * lose who won.
  */
 export function settleRound(guildId, round, { cancelled = false } = {}) {
-  const { drawn, unlucky } = cancelled ? { drawn: [], unlucky: [] } : drawWinners(round);
+  const picks = cancelled ? [] : drawWinners(round);
   // Drawn first → third place, last drawn → first.
-  const winners = drawn.map((t, i) => ({
-    place: drawn.length - i, // 3rd, 2nd, 1st as they come out
+  const results = picks.map((t, i) => ({
+    place: picks.length - i, // 3rd, 2nd, 1st as they come out
     userId: t.by,
     number: t.n,
-    prize: round.prizes?.[drawn.length - i - 1] || null,
+    prize: round.prizes?.[picks.length - i - 1] || null,
+    forfeited: Boolean(t.out),
+    strikes: strikesOf(round, t.by),
   }));
+  // A place drawn by someone who struck out is not awarded at all — the prize
+  // is lost, not handed down.
+  const winners = results.filter((r) => !r.forfeited).map(({ forfeited, strikes, ...w }) => w);
+  const unlucky = results.filter((r) => r.forfeited);
 
   const history = store.getCountHistory(guildId);
   const record = {
@@ -166,7 +191,7 @@ export function settleRound(guildId, round, { cancelled = false } = {}) {
     status: cancelled ? 'cancelled' : 'finished',
     endedAt: new Date().toISOString(),
     winners,
-    unlucky: unlucky.map((t) => ({ userId: t.by, number: t.n, strikes: strikesOf(round, t.by) })),
+    unlucky,
     players: new Set(Object.values(round.entries).map((e) => e.by)).size,
     claimed: countOf(round),
   };
@@ -190,30 +215,35 @@ export async function announceDraw(channel, record) {
         text: `Round #${record.id} · ${number(record.claimed)} numbers from ${record.players} member(s) · /${config.countRoot} round ${record.id}`,
       });
 
-  const lines = [`Every number from **${number(record.from)}** to **${number(record.to)}** was claimed. Drawing three winners…`];
+  const lines = [`Every number from **${number(record.from)}** to **${number(record.to)}** was claimed. Drawing…`];
   const message = await channel.send({ embeds: [base().setDescription(lines.join('\n'))] });
 
-  // Anyone drawn who had struck out: their number came up and they lost it.
-  for (const u of (record.unlucky || []).slice(0, 5)) {
-    await sleep(config.countRevealMs);
-    lines.push(`💀 **UNLUCKY** — <@${u.userId}> held **${number(u.number)}** but is out on ${u.strikes} strikes.`);
-    await message.edit({ embeds: [base().setDescription(lines.join('\n'))] }).catch(() => {});
-  }
-  if ((record.unlucky || []).length) lines.push('');
-
-  // Backwards: third place first, the big one last.
+  // Third place first, the big one last. A place drawn by someone who struck
+  // out is announced as lost — it is not passed on to anyone else.
+  const unlucky = record.unlucky || [];
   for (const place of [3, 2, 1]) {
     const w = winners.find((x) => x.place === place);
-    if (!w) continue;
+    const u = unlucky.find((x) => x.place === place);
+    if (!w && !u) continue;
     await sleep(config.countRevealMs);
-    lines.push(`${PLACES[place - 1]} ${prizeLine(w)}`);
+    lines.push(
+      w
+        ? `${PLACES[place - 1]} ${prizeLine(w)}`
+        : `${PLACES[place - 1]} 💀 **UNLUCKY** — <@${u.userId}> held **${number(u.number)}** but struck out ${u.strikes} times.` +
+          `\n⠀⠀${u.prize ? `**${u.prize}** goes unclaimed` : 'No prize awarded'} — it isn't passed on.`,
+    );
     await message
       .edit({
-        content: place === 1 ? winners.map((x) => `<@${x.userId}>`).join(' ') : undefined,
+        content: place === 1 && winners.length ? winners.map((x) => `<@${x.userId}>`).join(' ') : undefined,
         embeds: [base().setDescription(lines.join('\n'))],
-        allowedMentions: { users: winners.map((x) => x.userId) },
+        allowedMentions: { users: [...winners, ...unlucky].map((x) => x.userId) },
       })
       .catch(() => {});
+  }
+
+  if (unlucky.length) {
+    lines.push('', `⚠️ ${unlucky.length} prize(s) went unclaimed — ${winners.length} winner(s) this round.`);
+    await message.edit({ embeds: [base().setDescription(lines.join('\n'))] }).catch(() => {});
   }
   return message;
 }
@@ -247,6 +277,41 @@ async function fleeting(channel, content, userId, ms = 8000) {
   if (sent) setTimeout(() => sent.delete().catch(() => {}), ms);
 }
 
+/**
+ * Tell a member what a strike was for. The one that puts them out stays in the
+ * channel — it changes what the round means for them — and the rest take
+ * themselves back. Once they're out there is nothing new to say, so that is
+ * kept to one note a minute.
+ */
+async function strikeNotice(message, result, round, prefix = '') {
+  if (!result.strikes) return;
+  const who = `<@${message.author.id}>`;
+  const why = result.why ? ` — ${result.why}` : '';
+  const next = `The next number is **${number(round.next)}**.`;
+
+  if (result.justOut) {
+    await message.channel
+      .send({
+        content:
+          `💀 ${who} is **out of the prize draw** — ${config.countStrikes} strikes${why}.\n` +
+          'You can keep counting, but a number of yours can no longer win this round.',
+        allowedMentions: { users: [message.author.id] },
+      })
+      .catch(() => {});
+    return;
+  }
+  if (result.out) {
+    // Already out: no need to narrate every further slip.
+    if (shouldRemind(message.author.id)) await fleeting(message.channel, `${who} you're out of this round's draw. ${next}`, message.author.id);
+    return;
+  }
+  await fleeting(
+    message.channel,
+    `${who} ${prefix || 'Wrong number'}${why} — **strike ${result.strikes}/${config.countStrikes}**. ${next}`,
+    message.author.id,
+  );
+}
+
 export async function onCountingMessage(message, client) {
   try {
     const round = message.guildId && store.getCounting(message.guildId);
@@ -263,18 +328,16 @@ export async function onCountingMessage(message, client) {
 
     // Anything that isn't a number: the channel is for counting only.
     if (result.chat) {
-      if (!config.countNumbersOnly) return;
-      const gone = await message.delete().then(() => true).catch(() => false);
-      if (!gone) {
-        if (!warnedCannotDelete.has(message.channelId)) {
+      if (config.countNumbersOnly) {
+        const gone = await message.delete().then(() => true).catch(() => false);
+        if (!gone && !warnedCannotDelete.has(message.channelId)) {
           warnedCannotDelete.add(message.channelId);
           console.warn(`Counting channel ${message.channelId}: cannot delete chat — I need Manage Messages there.`);
         }
-        return;
       }
-      if (shouldRemind(message.author.id)) {
-        await fleeting(message.channel, `<@${message.author.id}> this channel is for counting only — the next number is **${number(round.next)}**.`, message.author.id);
-      }
+      // Whether or not the message could be removed, a strike was given — and a
+      // strike nobody is told about is one they can't learn from.
+      await strikeNotice(message, result, round, 'This channel is for counting only');
       return;
     }
 
@@ -291,21 +354,7 @@ export async function onCountingMessage(message, client) {
     if (config.countDeleteWrong) await message.delete().catch(() => {});
     if (result.refused) await fleeting(message.channel, `<@${message.author.id}> ${result.message}`, message.author.id, 10000);
 
-    if (result.justOut) {
-      // Worth a message that stays: it changes what the round means for them.
-      await message.channel
-        .send({
-          content: `💀 <@${message.author.id}> is **out of the prize draw** — ${config.countStrikes} strikes. You can keep counting, but a number of yours can no longer win.`,
-          allowedMentions: { users: [message.author.id] },
-        })
-        .catch(() => {});
-    } else if (result.wrong && result.strikes) {
-      await fleeting(
-        message.channel,
-        `<@${message.author.id}> wrong number — **strike ${result.strikes}/${config.countStrikes}**. The next one is **${number(result.expected)}**.`,
-        message.author.id,
-      );
-    }
+    await strikeNotice(message, result, round);
   } catch (err) {
     console.error('Counting message failed:', err.message);
   }
@@ -392,8 +441,9 @@ async function cmdOpen(interaction) {
               `• Up to **${config.countDailyLimit}** numbers each per day`,
               config.countNumbersOnly ? '• **Numbers only** here — anything else is removed' : null,
               config.countStrikes
-                ? `• **${config.countStrikes} strikes and you're out**: a wrong number is a strike, and after ${config.countStrikes} your numbers can no longer win`
+                ? `• **${config.countStrikes} strikes and you're out** — a wrong number${config.countChatStrikes ? ', or writing anything that isn\'t a number,' : ''} costs one. That includes being beaten to a number by someone faster, so read before you type.`
                 : null,
+              config.countStrikes ? '• Struck out? You can still count, but your numbers can no longer win — and if one is drawn, that prize is lost, not passed on.' : null,
               config.countNoDouble ? '• You can\'t take two in a row' : null,
               `• When **${number(to)}** is reached, three of you win — drawn 3rd, 2nd, then 1st`,
               `• Every number you hold is a ticket, so counting more often is worth more`,
@@ -451,13 +501,19 @@ async function cmdMe(interaction) {
     .sort((a, b) => a - b);
   if (!mine.length) return ephemeral(interaction, `You haven't claimed a number yet — type **${number(round.next)}** in <#${round.channelId}>.`);
   const shown = mine.slice(0, 60).map(number).join(', ');
+  const mineStrikes = strikeList(round, interaction.user.id);
   return interaction.reply({
     flags: MessageFlags.Ephemeral,
     embeds: [
       new EmbedBuilder()
         .setColor(GOLD)
         .setTitle(`🎟️ Your ${mine.length} ticket(s)`)
-        .setDescription(`${shown}${mine.length > 60 ? ` … and ${mine.length - 60} more` : ''}`)
+        .setDescription(
+          `${shown}${mine.length > 60 ? ` … and ${mine.length - 60} more` : ''}` +
+            (mineStrikes.length
+              ? `\n\n**Your strikes**\n${mineStrikes.map((x, i) => `${i + 1}. ${strikeText(x)}`).join('\n')}`
+              : ''),
+        )
         .setFooter({
           text:
             `${Math.max(0, config.countDailyLimit - claimedToday(round, interaction.user.id))} left today` +
@@ -496,11 +552,18 @@ async function cmdStrikes(interaction) {
   const round = store.getCounting(interaction.guildId);
   if (!round) return ephemeral(interaction, 'No round is running.');
   if (!config.countStrikes) return ephemeral(interaction, 'Strikes are turned off for this server.');
-  const all = Object.entries(round.strikes || {}).sort((a, b) => b[1] - a[1]);
+  const all = Object.entries(round.strikes || {})
+    .map(([id]) => [id, strikesOf(round, id)])
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1]);
   if (!all.length) return interaction.reply({ embeds: [new EmbedBuilder().setColor(GOLD).setTitle('✅ Nobody has a strike yet').setDescription('Keep it that way.')] });
   const lines = all
-    .slice(0, 25)
-    .map(([id, n]) => `${n >= config.countStrikes ? '💀' : '⚠️'} <@${id}> — **${n}/${config.countStrikes}**${n >= config.countStrikes ? ' · out of the draw' : ''}`);
+    .slice(0, 12)
+    .map(([id]) => {
+      const list = strikeList(round, id);
+      const head = `${isOut(round, id) ? '💀' : '⚠️'} <@${id}> — **${list.length}/${config.countStrikes}**${isOut(round, id) ? ' · out of the draw' : ''}`;
+      return [head, ...list.slice(0, 5).map((x) => `⠀⠀• ${strikeText(x)}`)].join('\n');
+    });
   return interaction.reply({
     embeds: [
       new EmbedBuilder()
@@ -570,12 +633,17 @@ async function cmdRound(interaction) {
   const id = interaction.options.getInteger('id', true);
   const record = store.getCountHistory(interaction.guildId).rounds.find((r) => r.id === id);
   if (!record) return ephemeral(interaction, `No round #${id}.`);
-  const winners = record.winners?.length
-    ? [1, 2, 3].map((place) => {
-        const w = record.winners.find((x) => x.place === place);
-        return w ? `${PLACES[place - 1]} ${prizeLine(w)}` : null;
-      }).filter(Boolean).join('\n')
-    : '_Cancelled — no draw._';
+  const results = [1, 2, 3]
+    .map((place) => {
+      const w = record.winners?.find((x) => x.place === place);
+      if (w) return `${PLACES[place - 1]} ${prizeLine(w)}`;
+      const u = record.unlucky?.find((x) => x.place === place);
+      if (u) return `${PLACES[place - 1]} 💀 UNLUCKY — <@${u.userId}> held ${number(u.number)}, ${u.strikes} strikes · not awarded`;
+      return null;
+    })
+    .filter(Boolean)
+    .join('\n');
+  const winners = results || '_Cancelled — no draw._';
   return interaction.reply({
     embeds: [
       new EmbedBuilder()
