@@ -226,7 +226,7 @@ Every day at `BIRTHDAY_HOUR` (default 09:00) in `BIRTHDAY_TIMEZONE` (default: th
 | `/sgdraft start [title] [join]` | anyone | Open a lobby in this channel. The number of teams is decided at Draft, once everyone has joined. |
 | `/sgdraft add <user>` / `/sgdraft kick <user>` | host | Add or remove a player in this channel's lobby. |
 | `/sgdraft swap <player1> <player2>` | host | Swap two drafted players (between teams, or with someone sitting out). |
-| 🤝 **Friends** button | 👑 host | Opens a picker: choose 2–5 players and they're drafted onto the same team. Stays open to make more groups, and offers **Clear all**. |
+| 🤝 **Friends** button | 👑 host | Opens a picker: choose 2–5 players and they're drafted onto the same team. Available from the moment people start joining, stays open so several groups can be made at once (**X1+X2**, **Y1+Y2**, **Z+X+C** …), shows who is already with whom, and offers **🧹 Clear all** / **🚪 Leave my group**. |
 | `/sgdraft friends <a> <b> [c] [d] [e]` | 👑 host | The same thing as a command. Merges with a group they're already in. |
 | `/sgdraft unfriends <user>` | 👑 host | Let a player be drafted anywhere again. |
 | `/sgdraft aura [user]` | anyone | Show a player's AURA (and 🎀) as the drafter reads it. |
