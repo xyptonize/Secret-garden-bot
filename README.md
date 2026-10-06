@@ -197,6 +197,8 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `COUNT_DAILY_LIMIT` | — | `5` | Numbers one member may claim per day. |
 | `COUNT_WEIGHTED` | — | `true` | Every number held is a ticket. `false` = one entry per member. |
 | `COUNT_NO_DOUBLE` | — | `false` | `true` stops anyone taking two numbers in a row. |
+| `COUNT_STRIKES` | — | `3` | Wrong numbers before a member can no longer win the round (0 = off). |
+| `COUNT_CHAT_STRIKES` | — | `false` | `true` makes non-numeric chat cost a strike too. |
 | `COUNT_NUMBERS_ONLY` | — | `true` | Deletes anything that isn't a number in the counting channel (needs Manage Messages). |
 | `COUNT_DELETE_WRONG` | — | `false` | `true` also deletes wrong numbers instead of just marking them ❌. |
 | `COUNT_REVEAL_MS` | — | `2500` | Pause between revealing 3rd, 2nd and 1st. |
@@ -359,6 +361,8 @@ Games that span several presses (mines, blackjack) keep their state in `data/sto
 
 An admin opens a round over a range — say **1 to 500**. The bot announces it with **@everyone**, names the range, and posts the rules; members then count up **in order** in that channel. Type the next number and it's yours (✅); type a different number and it doesn't count (❌). **Anything that isn't a number is deleted** — the channel stays a clean run of numbers — and the member is told once (at most once a minute) what the next number is. The bot needs **Manage Messages** there; `/sgcount open` refuses up front if it doesn't have it, rather than letting chat pile up. Each member may claim **5 numbers a day** (`COUNT_DAILY_LIMIT`).
 
+**Three strikes.** Every member starts each round with three. A wrong number costs one — the bot replies with `strike 2/3` and takes the note back a few seconds later. On the third, a message that stays says they're **out of the prize draw**: they can keep counting, and their numbers still fill the range, but those numbers can no longer win. If a struck-out member's number *is* drawn, the announcement calls it out — **💀 UNLUCKY — @them held 237 but is out on 3 strikes** — and the draw carries on to find an eligible winner for that place. Chat costs no strike by default (`COUNT_CHAT_STRIKES=true` changes that), and `/sgcount forgive` clears a member's strikes.
+
 When the last number is claimed the bot draws **three different members** and reveals them in suspense order: 🥉 third, then 🥈 second, then 🥇 first — the biggest prize last. Every number you hold is a ticket, so counting more often is worth more (`COUNT_WEIGHTED=false` for one entry per member regardless).
 
 | Command | Who | What it does |
@@ -367,6 +371,8 @@ When the last number is claimed the bot draws **three different members** and re
 | `/sgcount status` | anyone | The next number, how far along, how many you hold. |
 | `/sgcount me` | anyone | Every number you hold. |
 | `/sgcount top` | anyone | Who holds the most tickets, and their share of the draw. |
+| `/sgcount strikes` | anyone | Who has strikes, and who can no longer win. |
+| `/sgcount forgive <user>` | Manage Server | Clear a member's strikes. |
 | `/sgcount close` | Manage Server | Draw now, without filling the range. |
 | `/sgcount cancel` | Manage Server | Drop the round with no draw. |
 | `/sgcount history` · `/sgcount round <id>` | anyone | Past rounds and who won what. |

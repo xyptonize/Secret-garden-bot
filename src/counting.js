@@ -37,6 +37,19 @@ function claimedToday(round, userId) {
   return n;
 }
 
+/** Strikes against one member this round, and whether that puts them out. */
+export const strikesOf = (round, userId) => round.strikes?.[userId] || 0;
+export const isOut = (round, userId) => config.countStrikes > 0 && strikesOf(round, userId) >= config.countStrikes;
+
+/** Add a strike. Returns the new total and whether it was the one that did it. */
+function strike(round, userId) {
+  if (!config.countStrikes) return { strikes: 0, out: false };
+  if (!round.strikes) round.strikes = {};
+  const was = isOut(round, userId);
+  round.strikes[userId] = strikesOf(round, userId) + 1;
+  return { strikes: round.strikes[userId], out: isOut(round, userId), justOut: !was && isOut(round, userId) };
+}
+
 const countOf = (round) => Object.keys(round.entries).length;
 const sizeOf = (round) => round.to - round.from + 1;
 
@@ -59,10 +72,19 @@ export function offerNumber(guildId, { userId, text, bot }) {
   // Only a bare number is an attempt to count. Anything else is chat, which the
   // caller clears out so the channel stays a clean run of numbers.
   const cleaned = String(text ?? '').trim().replace(/[,\s_]/g, '');
-  if (!/^\d{1,15}$/.test(cleaned)) return { chat: true };
+  if (!/^\d{1,15}$/.test(cleaned)) {
+    if (!config.countChatStrikes) return { chat: true };
+    const s = strike(round, userId);
+    store.setCounting(guildId, round);
+    return { chat: true, ...s };
+  }
   const value = Number(cleaned);
 
-  if (value !== round.next) return { wrong: true, expected: round.next, got: value };
+  if (value !== round.next) {
+    const s = strike(round, userId);
+    store.setCounting(guildId, round);
+    return { wrong: true, expected: round.next, got: value, ...s };
+  }
   if (config.countNoDouble && round.last === userId) {
     return { refused: 'twice', message: 'Someone else has to take the next one.' };
   }
@@ -102,20 +124,24 @@ export function offerNumber(guildId, { userId, text, bot }) {
  */
 export function drawWinners(round, { weighted = config.countWeighted } = {}) {
   const tickets = Object.entries(round.entries).map(([n, e]) => ({ n: Number(n), by: e.by }));
-  if (!tickets.length) return [];
+  if (!tickets.length) return { drawn: [], unlucky: [] };
 
   const pool = weighted
     ? tickets
     : [...new Set(tickets.map((t) => t.by))].map((by) => tickets.find((t) => t.by === by));
 
   const drawn = [];
+  const unlucky = [];
   let left = pool;
   while (drawn.length < 3 && left.length) {
     const pick = left[randomInt(0, left.length)];
-    drawn.push(pick);
-    left = left.filter((t) => t.by !== pick.by); // one prize per member
+    // Struck out: their number still comes out of the hat, they just can't take
+    // the prize. Everyone gets to see it happen.
+    if (isOut(round, pick.by)) unlucky.push(pick);
+    else drawn.push(pick);
+    left = left.filter((t) => t.by !== pick.by); // one result per member
   }
-  return drawn;
+  return { drawn, unlucky };
 }
 
 /**
@@ -124,7 +150,7 @@ export function drawWinners(round, { weighted = config.countWeighted } = {}) {
  * lose who won.
  */
 export function settleRound(guildId, round, { cancelled = false } = {}) {
-  const drawn = cancelled ? [] : drawWinners(round);
+  const { drawn, unlucky } = cancelled ? { drawn: [], unlucky: [] } : drawWinners(round);
   // Drawn first → third place, last drawn → first.
   const winners = drawn.map((t, i) => ({
     place: drawn.length - i, // 3rd, 2nd, 1st as they come out
@@ -140,6 +166,7 @@ export function settleRound(guildId, round, { cancelled = false } = {}) {
     status: cancelled ? 'cancelled' : 'finished',
     endedAt: new Date().toISOString(),
     winners,
+    unlucky: unlucky.map((t) => ({ userId: t.by, number: t.n, strikes: strikesOf(round, t.by) })),
     players: new Set(Object.values(round.entries).map((e) => e.by)).size,
     claimed: countOf(round),
   };
@@ -165,6 +192,14 @@ export async function announceDraw(channel, record) {
 
   const lines = [`Every number from **${number(record.from)}** to **${number(record.to)}** was claimed. Drawing three winners…`];
   const message = await channel.send({ embeds: [base().setDescription(lines.join('\n'))] });
+
+  // Anyone drawn who had struck out: their number came up and they lost it.
+  for (const u of (record.unlucky || []).slice(0, 5)) {
+    await sleep(config.countRevealMs);
+    lines.push(`💀 **UNLUCKY** — <@${u.userId}> held **${number(u.number)}** but is out on ${u.strikes} strikes.`);
+    await message.edit({ embeds: [base().setDescription(lines.join('\n'))] }).catch(() => {});
+  }
+  if ((record.unlucky || []).length) lines.push('');
 
   // Backwards: third place first, the big one last.
   for (const place of [3, 2, 1]) {
@@ -255,6 +290,22 @@ export async function onCountingMessage(message, client) {
     await message.react(result.wrong ? '❌' : '🚫').catch(() => {});
     if (config.countDeleteWrong) await message.delete().catch(() => {});
     if (result.refused) await fleeting(message.channel, `<@${message.author.id}> ${result.message}`, message.author.id, 10000);
+
+    if (result.justOut) {
+      // Worth a message that stays: it changes what the round means for them.
+      await message.channel
+        .send({
+          content: `💀 <@${message.author.id}> is **out of the prize draw** — ${config.countStrikes} strikes. You can keep counting, but a number of yours can no longer win.`,
+          allowedMentions: { users: [message.author.id] },
+        })
+        .catch(() => {});
+    } else if (result.wrong && result.strikes) {
+      await fleeting(
+        message.channel,
+        `<@${message.author.id}> wrong number — **strike ${result.strikes}/${config.countStrikes}**. The next one is **${number(result.expected)}**.`,
+        message.author.id,
+      );
+    }
   } catch (err) {
     console.error('Counting message failed:', err.message);
   }
@@ -340,6 +391,9 @@ async function cmdOpen(interaction) {
               '',
               `• Up to **${config.countDailyLimit}** numbers each per day`,
               config.countNumbersOnly ? '• **Numbers only** here — anything else is removed' : null,
+              config.countStrikes
+                ? `• **${config.countStrikes} strikes and you're out**: a wrong number is a strike, and after ${config.countStrikes} your numbers can no longer win`
+                : null,
               config.countNoDouble ? '• You can\'t take two in a row' : null,
               `• When **${number(to)}** is reached, three of you win — drawn 3rd, 2nd, then 1st`,
               `• Every number you hold is a ticket, so counting more often is worth more`,
@@ -370,7 +424,14 @@ function statusEmbed(round, userId) {
         `**${number(size - claimed)}** to go before the draw.`,
         '',
         `You hold **${mine.length}** number(s) · **${Math.max(0, config.countDailyLimit - claimedToday(round, userId))}** left today`,
-      ].join('\n'),
+        config.countStrikes
+          ? isOut(round, userId)
+            ? `💀 You are **out of the prize draw** — ${strikesOf(round, userId)} strikes.`
+            : `Strikes: **${strikesOf(round, userId)}/${config.countStrikes}**`
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n'),
     )
     .setFooter({ text: `Round #${round.id} · ${new Set(Object.values(round.entries).map((e) => e.by)).size} member(s) counting` });
 }
@@ -397,7 +458,15 @@ async function cmdMe(interaction) {
         .setColor(GOLD)
         .setTitle(`🎟️ Your ${mine.length} ticket(s)`)
         .setDescription(`${shown}${mine.length > 60 ? ` … and ${mine.length - 60} more` : ''}`)
-        .setFooter({ text: `${Math.max(0, config.countDailyLimit - claimedToday(round, interaction.user.id))} left today` }),
+        .setFooter({
+          text:
+            `${Math.max(0, config.countDailyLimit - claimedToday(round, interaction.user.id))} left today` +
+            (config.countStrikes
+              ? isOut(round, interaction.user.id)
+                ? ` · 💀 out of the draw (${strikesOf(round, interaction.user.id)} strikes)`
+                : ` · ${strikesOf(round, interaction.user.id)}/${config.countStrikes} strikes`
+              : ''),
+        }),
     ],
   });
 }
@@ -412,10 +481,51 @@ async function cmdTop(interaction) {
   const lines = [...tally.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 15)
-    .map(([id, n], i) => `**${i + 1}.** <@${id}> — ${n} ticket(s) · ${((100 * n) / total).toFixed(1)}% of the draw`);
+    .map(([id, n], i) =>
+      isOut(round, id)
+        ? `**${i + 1}.** <@${id}> — ${n} ticket(s) · 💀 **out** (${strikesOf(round, id)} strikes)`
+        : `**${i + 1}.** <@${id}> — ${n} ticket(s) · ${((100 * n) / total).toFixed(1)}% of the draw`,
+    );
   return interaction.reply({
     embeds: [new EmbedBuilder().setColor(GOLD).setTitle('🎟️ Who holds the most tickets').setDescription(lines.join('\n'))],
     allowedMentions: { parse: [] },
+  });
+}
+
+async function cmdStrikes(interaction) {
+  const round = store.getCounting(interaction.guildId);
+  if (!round) return ephemeral(interaction, 'No round is running.');
+  if (!config.countStrikes) return ephemeral(interaction, 'Strikes are turned off for this server.');
+  const all = Object.entries(round.strikes || {}).sort((a, b) => b[1] - a[1]);
+  if (!all.length) return interaction.reply({ embeds: [new EmbedBuilder().setColor(GOLD).setTitle('✅ Nobody has a strike yet').setDescription('Keep it that way.')] });
+  const lines = all
+    .slice(0, 25)
+    .map(([id, n]) => `${n >= config.countStrikes ? '💀' : '⚠️'} <@${id}> — **${n}/${config.countStrikes}**${n >= config.countStrikes ? ' · out of the draw' : ''}`);
+  return interaction.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(GOLD)
+        .setTitle('⚠️ Strikes')
+        .setDescription(lines.join('\n'))
+        .setFooter({ text: `${config.countStrikes} strikes and a number of yours can no longer win · wrong numbers only` }),
+    ],
+    allowedMentions: { parse: [] },
+  });
+}
+
+async function cmdForgive(interaction) {
+  if (!isAdmin(interaction)) return ephemeral(interaction, '🔒 Only admins (Manage Server) can clear strikes.');
+  const round = store.getCounting(interaction.guildId);
+  if (!round) return ephemeral(interaction, 'No round is running.');
+  const user = interaction.options.getUser('user', true);
+  const had = strikesOf(round, user.id);
+  if (!had) return ephemeral(interaction, `<@${user.id}> has no strikes.`);
+  const wasOut = isOut(round, user.id);
+  delete round.strikes[user.id];
+  store.setCounting(interaction.guildId, round);
+  return interaction.reply({
+    content: `✅ Cleared <@${user.id}>'s ${had} strike(s)${wasOut ? ' — they can win again.' : '.'}`,
+    allowedMentions: { users: [user.id] },
   });
 }
 
@@ -485,6 +595,8 @@ async function cmdRound(interaction) {
 
 const HANDLERS = {
   open: cmdOpen,
+  strikes: cmdStrikes,
+  forgive: cmdForgive,
   status: cmdStatus,
   me: cmdMe,
   top: cmdTop,
@@ -524,6 +636,13 @@ const data = new SlashCommandBuilder()
   .addSubcommand((s) => s.setName('status').setDescription('What number is next and how far along the round is'))
   .addSubcommand((s) => s.setName('me').setDescription('The numbers you hold'))
   .addSubcommand((s) => s.setName('top').setDescription('Who holds the most tickets'))
+  .addSubcommand((s) => s.setName('strikes').setDescription('Who has strikes, and who can no longer win'))
+  .addSubcommand((s) =>
+    s
+      .setName('forgive')
+      .setDescription('(Admin) Clear a member\'s strikes')
+      .addUserOption((o) => o.setName('user').setDescription('Who to forgive').setRequired(true)),
+  )
   .addSubcommand((s) => s.setName('close').setDescription('(Admin) Draw now, without filling the range'))
   .addSubcommand((s) => s.setName('cancel').setDescription('(Admin) Drop the round with no draw'))
   .addSubcommand((s) => s.setName('history').setDescription('Past rounds and their winners'))

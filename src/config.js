@@ -77,6 +77,8 @@ export const config = {
   countRoot: rootName(process.env.COUNT_COMMAND_ROOT, 'sgcount'),
   countDailyLimit: Math.max(1, numberOr(process.env.COUNT_DAILY_LIMIT, 5)), // numbers per member per day
   countNoDouble: (process.env.COUNT_NO_DOUBLE || 'false').toLowerCase() === 'true', // ban counting twice in a row
+  countStrikes: Math.max(0, numberOr(process.env.COUNT_STRIKES, 3)), // wrong numbers before you can't win (0 = off)
+  countChatStrikes: (process.env.COUNT_CHAT_STRIKES || 'false').toLowerCase() === 'true', // chat costs a strike too
   countNumbersOnly: (process.env.COUNT_NUMBERS_ONLY || 'true').toLowerCase() !== 'false', // delete chat in the counting channel
   countDeleteWrong: (process.env.COUNT_DELETE_WRONG || 'false').toLowerCase() === 'true', // also delete wrong numbers
   countWeighted: (process.env.COUNT_WEIGHTED || 'true').toLowerCase() !== 'false', // each number is a ticket
