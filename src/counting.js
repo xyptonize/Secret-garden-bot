@@ -111,6 +111,11 @@ export function offerNumber(guildId, { userId, text, bot }) {
   const value = Number(cleaned);
 
   if (value !== round.next) {
+    // Nobody has counted yet: the round hasn't really started, and guessing 1
+    // when it opens on 0 is an honest mistake rather than a strike.
+    if (!Object.keys(round.entries).length) {
+      return { wrong: true, expected: round.next, got: value, grace: true };
+    }
     // Behind the count is the connection-lag case: the number was already
     // claimed while their message was in flight. Ahead of it is not counting.
     const reason = value < round.next ? 'late' : 'skip';
@@ -141,6 +146,36 @@ export function offerNumber(guildId, { userId, text, bot }) {
     filled,
     round,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Opening and closing the channel
+// ---------------------------------------------------------------------------
+
+/**
+ * Let members type in the counting channel, or stop them. The channel is open
+ * only while a round is running, so numbers can't be posted into a round that
+ * doesn't exist and the last round's result stays the final word.
+ *
+ * The bot grants itself an explicit allow when locking: the @everyone denial
+ * applies to the bot too, and a locked channel it cannot speak in could never
+ * announce the next round.
+ */
+export async function setChannelOpen(channel, open, client) {
+  if (!config.countLockChannel || !channel?.permissionOverwrites) return null;
+  const everyone = channel.guild?.roles?.everyone;
+  if (!everyone) return null;
+  const reason = open ? 'Counting round opened' : 'Counting round finished';
+  try {
+    if (!open && client?.user) {
+      await channel.permissionOverwrites.edit(client.user.id, { SendMessages: true }, { reason });
+    }
+    await channel.permissionOverwrites.edit(everyone, { SendMessages: open }, { reason });
+    return true;
+  } catch (err) {
+    console.warn(`Counting channel ${channel.id}: couldn't ${open ? 'unlock' : 'lock'} it — ${err.message}`);
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +308,16 @@ export async function announceDraw(channel, record) {
 // The message hook
 // ---------------------------------------------------------------------------
 
+/** Lock the channel behind a finished round, and say so. */
+async function closeChannelAfterRound(channel, client) {
+  const locked = await setChannelOpen(channel, false, client);
+  if (locked) {
+    await channel
+      .send({ content: `🔒 The counting channel is closed until the next round opens.` })
+      .catch(() => {});
+  }
+}
+
 /**
  * Called for every message in a guild. Does nothing unless it lands in the
  * channel of an open round.
@@ -389,12 +434,21 @@ export async function onCountingMessage(message, client) {
       await message.react('✅').catch(() => {});
       if (settled) {
         await announceDraw(message.channel, settled.record).catch((err) => console.error('Draw announcement failed:', err.message));
+        await closeChannelAfterRound(message.channel, client);
       }
       return;
     }
 
     await message.react(result.wrong ? '❌' : '🚫').catch(() => {});
     if (config.countDeleteWrong) await message.delete().catch(() => {});
+    if (result.grace) {
+      await fleeting(
+        message.channel,
+        `<@${message.author.id}> this round starts at **${number(result.expected)}** — no strike, nothing has been counted yet.`,
+        message.author.id,
+      );
+      return;
+    }
     if (result.refused) await fleeting(message.channel, `<@${message.author.id}> ${result.message}`, message.author.id, 10000);
 
     await strikeNotice(message, result, round);
@@ -444,6 +498,32 @@ async function cmdOpen(interaction) {
         'Give me that permission there, or set `COUNT_NUMBERS_ONLY=false` to let people chat in the counting channel.',
     );
   }
+  // Two counting bots in one channel fight: the other one deletes the numbers
+  // while this one has already counted them. And a channel members can't post
+  // in cannot host a count at all. Both are worth saying before the round opens.
+  const warnings = [];
+  const everyone = interaction.guild?.roles?.everyone;
+  const theirs = everyone && channel.permissionsFor(everyone);
+  const shut = theirs && !theirs.has(PermissionFlagsBits.SendMessages);
+  if (shut && !config.countLockChannel) {
+    warnings.push(`**@everyone can't send messages in ${channel}** — nobody will be able to count there. Unlock the channel first.`);
+  }
+  try {
+    const recent = await channel.messages.fetch({ limit: 25 });
+    const others = new Map();
+    for (const m of recent.values()) {
+      if (m.author?.bot && m.author.id !== interaction.client.user.id) others.set(m.author.id, m.author.username);
+    }
+    if (others.size) {
+      warnings.push(
+        `**${[...others.values()].join(', ')}** ${others.size > 1 ? 'are' : 'is'} also posting in ${channel}. ` +
+          'Another counting bot will delete numbers this one has already counted — use a channel of its own.',
+      );
+    }
+  } catch {
+    // No Read Message History: not worth refusing over.
+  }
+
   const ping = interaction.options.getString('ping') ?? 'everyone';
   // @everyone renders whether or not the bot may ping, so a missing permission
   // would look like it worked while nobody was actually notified.
@@ -468,6 +548,20 @@ async function cmdOpen(interaction) {
   store.persistCountHistory();
   store.setCounting(interaction.guildId, round);
 
+  // The channel is only open while a round is running.
+  const opened = await setChannelOpen(channel, true, interaction.client);
+  if (opened === false) {
+    warnings.push(
+      `I couldn't unlock ${channel} — I need **Manage Roles** (or Manage Channels) there to open and close it between rounds. ` +
+        'Members may not be able to type.',
+    );
+  } else if (opened === null && shut) {
+    warnings.push(
+      `**@everyone can't send messages in ${channel}** — nobody will be able to count there. ` +
+        'Unlock it yourself, or give me **Manage Roles** there and I will open and close it with each round.',
+    );
+  }
+
   const prizes = round.prizes.some(Boolean)
     ? round.prizes.map((p, i) => `${PLACES[i]} ${p || '—'}`).join('\n')
     : '_Set when the winners are announced._';
@@ -475,7 +569,8 @@ async function cmdOpen(interaction) {
     flags: MessageFlags.Ephemeral,
     content:
       `✅ Round #${round.id} is open in ${channel}.` +
-      (silent ? `\n⚠️ I don't have **Mention @everyone** there, so the announcement will post but won't notify anyone.` : ''),
+      (silent ? `\n⚠️ I don't have **Mention @everyone** there, so the announcement will post but won't notify anyone.` : '') +
+      warnings.map((w) => `\n⚠️ ${w}`).join(''),
   });
 
   const mention = ping === 'everyone' ? '@everyone' : ping === 'here' ? '@here' : '';
@@ -504,6 +599,7 @@ async function cmdOpen(interaction) {
                 : null,
               config.countNoDouble ? '• You can\'t take two in a row' : null,
               `• When **${number(to)}** is reached, three of you win — drawn 3rd, 2nd, then 1st`,
+              config.countLockChannel ? '• The channel closes again as soon as the round is drawn' : null,
               `• Every number you hold is a ticket, so counting more often is worth more`,
             ]
               .filter(Boolean)
@@ -662,7 +758,10 @@ async function cmdClose(interaction) {
   const settled = settleRound(interaction.guildId, round);
   if (!settled) return undefined; // something else drew it first
   const channel = await interaction.client.channels.fetch(round.channelId).catch(() => interaction.channel);
-  if (channel) await announceDraw(channel, settled.record).catch((err) => console.error('Draw announcement failed:', err.message));
+  if (channel) {
+    await announceDraw(channel, settled.record).catch((err) => console.error('Draw announcement failed:', err.message));
+    await closeChannelAfterRound(channel, interaction.client);
+  }
   return undefined;
 }
 
@@ -674,6 +773,8 @@ async function cmdCancel(interaction) {
   const settled = settleRound(interaction.guildId, round, { cancelled: true });
   if (!settled) return ephemeral(interaction, 'That round was just settled.');
   const { record } = settled;
+  const channel = await interaction.client.channels.fetch(round.channelId).catch(() => null);
+  if (channel) await closeChannelAfterRound(channel, interaction.client);
   return interaction.reply(`🚫 Round #${record.id} cancelled — ${number(record.claimed)} number(s) were claimed, nobody was drawn.`);
 }
 

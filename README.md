@@ -202,6 +202,7 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `COUNT_CHAT_STRIKES` | — | `true` | Writing anything that isn't a number costs a strike too. |
 | `COUNT_NUMBERS_ONLY` | — | `true` | Deletes anything that isn't a number in the counting channel (needs Manage Messages). |
 | `COUNT_DELETE_WRONG` | — | `false` | `true` also deletes wrong numbers instead of just marking them ❌. |
+| `COUNT_LOCK_CHANNEL` | — | `true` | Open the counting channel when a round starts and close it when the round ends (needs Manage Roles). |
 | `COUNT_REVEAL_MS` | — | `2500` | Pause between revealing 3rd, 2nd and 1st. |
 | `CS2KZ_API_BASE` | — | `https://api.cs2kz.org` | API base URL. |
 
@@ -395,6 +396,12 @@ When the last number is claimed the bot draws **three different members** and re
 | `/sgcount close` | Manage Server | Draw now, without filling the range. |
 | `/sgcount cancel` | Manage Server | Drop the round with no draw. |
 | `/sgcount history` · `/sgcount round <id>` | anyone | Past rounds and who won what. |
+
+**The channel is only open while a round is running.** Opening a round lets `@everyone` send messages there; drawing, closing or cancelling it takes that away again and the bot says `🔒 The counting channel is closed until the next round opens.` The bot grants itself an explicit allow before locking, so it can still announce the next round. This needs **Manage Roles** in that channel; without it the round still opens and `/sgcount open` says what's missing. `COUNT_LOCK_CHANNEL=false` leaves the channel alone.
+
+**Give the count a channel of its own.** `/sgcount open` looks at the last 25 messages and warns if another bot is posting there: a second counting bot will delete numbers this one has already counted, and the two cannot be reconciled afterwards. It also warns if `@everyone` can't type there.
+
+**The first guess is free.** Until the first number is claimed, a wrong number costs no strike — it just says where the round starts. Typing `1` at a round that opens on `0` is an honest mistake, not a disqualification.
 
 Prizes are free text (`100,000₮`), so the bot announces and records them but never handles money. The full ledger of **who held which number** is kept forever in `data/count-history.json` alongside the winners, so any draw can be audited afterwards. Winners are drawn with a cryptographic random source, and the result is written to that file **before** it is announced.
 

@@ -89,6 +89,7 @@ export const config = {
   countNumbersOnly: (process.env.COUNT_NUMBERS_ONLY || 'true').toLowerCase() !== 'false', // delete chat in the counting channel
   countDeleteWrong: (process.env.COUNT_DELETE_WRONG || 'false').toLowerCase() === 'true', // also delete wrong numbers
   countWeighted: (process.env.COUNT_WEIGHTED || 'true').toLowerCase() !== 'false', // each number is a ticket
+  countLockChannel: (process.env.COUNT_LOCK_CHANNEL || 'true').toLowerCase() !== 'false', // close the channel between rounds
   countRevealMs: Math.max(0, numberOr(process.env.COUNT_REVEAL_MS, 2500)), // pause between the three winners
   // The day boundary for daily claims and drop caps — the server's own day.
   caseTimeZone: process.env.CASE_TIMEZONE?.trim() || process.env.BIRTHDAY_TIMEZONE?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone,
