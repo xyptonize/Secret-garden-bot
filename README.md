@@ -11,6 +11,7 @@ The Secret Garden Discord bot. Each feature has its own `sg***` command root:
 | `/sgprofile` | One card per member: stats, socials, KZ and draft record |
 | `/sgcase` | Profile-card backgrounds, unboxed like CS2 skins |
 | `/sgcasino` | Wager seeds — fair-odds games, duels and draft-match betting |
+| `/sgcount` | Counting draw — count up together, three members win |
 
 ## CS2KZ (`/sgkz`)
 
@@ -192,6 +193,12 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `CASINO_DAILY_LOSS_CAP` | — | `20000` | Once a member has lost this much in a day the bot stops taking their bets (0 = no cap). |
 | `CASINO_DUEL_MINUTES` | — | `5` | How long a duel challenge stands before it expires. |
 | `CASINO_SPIN_MS` | — | `800` | Pause before the slots result. |
+| `COUNT_COMMAND_ROOT` | — | `sgcount` | Parent command for the counting draw. |
+| `COUNT_DAILY_LIMIT` | — | `5` | Numbers one member may claim per day. |
+| `COUNT_WEIGHTED` | — | `true` | Every number held is a ticket. `false` = one entry per member. |
+| `COUNT_NO_DOUBLE` | — | `false` | `true` stops anyone taking two numbers in a row. |
+| `COUNT_DELETE_WRONG` | — | `false` | `true` deletes wrong numbers (needs Manage Messages). |
+| `COUNT_REVEAL_MS` | — | `2500` | Pause between revealing 3rd, 2nd and 1st. |
 | `CS2KZ_API_BASE` | — | `https://api.cs2kz.org` | API base URL. |
 
 ## Birthday reminders (`/sghb`)
@@ -347,15 +354,35 @@ Limits: stakes run from `CASINO_MIN_BET` to `CASINO_MAX_BET`, and once a member 
 
 Games that span several presses (mines, blackjack) keep their state in `data/store.json`, and any game still running when the bot restarts has its stake **refunded** on startup rather than swallowed.
 
+## Counting draw (`/sgcount`)
+
+An admin opens a round over a range — say **1 to 500** — and members count up **in order** in one channel. Type the next number and it's yours (✅); type anything else and it doesn't count (❌). Ordinary chat in the channel is ignored, not marked wrong. Each member may claim **5 numbers a day** (`COUNT_DAILY_LIMIT`).
+
+When the last number is claimed the bot draws **three different members** and reveals them in suspense order: 🥉 third, then 🥈 second, then 🥇 first — the biggest prize last. Every number you hold is a ticket, so counting more often is worth more (`COUNT_WEIGHTED=false` for one entry per member regardless).
+
+| Command | Who | What it does |
+|---|---|---|
+| `/sgcount open <from> <to> [channel] [title] [prize1..3]` | Manage Server | Start a round and post the rules. |
+| `/sgcount status` | anyone | The next number, how far along, how many you hold. |
+| `/sgcount me` | anyone | Every number you hold. |
+| `/sgcount top` | anyone | Who holds the most tickets, and their share of the draw. |
+| `/sgcount close` | Manage Server | Draw now, without filling the range. |
+| `/sgcount cancel` | Manage Server | Drop the round with no draw. |
+| `/sgcount history` · `/sgcount round <id>` | anyone | Past rounds and who won what. |
+
+Prizes are free text (`100,000₮`), so the bot announces and records them but never handles money. The full ledger of **who held which number** is kept forever in `data/count-history.json` alongside the winners, so any draw can be audited afterwards. Winners are drawn with a cryptographic random source, and the result is written to that file **before** it is announced.
+
+> **Requires the Message Content privilege.** Reading typed numbers needs it, and it is a switch only the application owner can flip: <https://discord.com/developers/applications> → the app → **Bot** → **Privileged Gateway Intents** → **Message Content Intent**. The bot checks for the privilege at startup and only asks the gateway for it when it has been granted — so it keeps running normally without it, logging a warning, and `/sgcount` starts working the moment the switch is on and the bot is restarted.
+
 ## Backups and service
 
-- **Daily backup:** `sgkz-bot-backup.timer` runs `deploy/backup-data.sh` at 04:30 and saves `data/` (registrations, bounties, birthdays, lobbies, draft history) as `/home/tengis.g/bot-backups/data-YYYY-MM-DD.tar.gz`. It keeps 30 days, readable only by tengis.g. Run one now with `systemctl start sgkz-bot-backup`.
+- **Daily backup:** `sgkz-bot-backup.timer` runs `deploy/backup-data.sh` at 04:30 and saves `data/` (registrations, bounties, birthdays, lobbies, draft history, card collections, counting rounds) as `/home/tengis.g/bot-backups/data-YYYY-MM-DD.tar.gz`. It keeps 30 days, readable only by tengis.g. Run one now with `systemctl start sgkz-bot-backup`.
 - **Restoring:** `systemctl stop sgkz-bot`, then `tar -xzf /home/tengis.g/bot-backups/data-<date>.tar.gz -C /home/tengis.g/bot/data`, then `systemctl start sgkz-bot`.
 - **Service user:** the bot runs as **tengis.g**, not root (`/etc/systemd/system/sgkz-bot.service.d/override.conf`, a copy is in `deploy/`), with `NoNewPrivileges`, `PrivateTmp` and `ProtectSystem=full`. `data/` must stay owned by tengis.g.
 
 ## Where data is stored
 
-Registrations, seen-record state, bounties, rank-role IDs, birthdays, saved contacts, card collections and open draft lobbies live in `data/store.json`; draft tournament history lives in `data/draft-history.json`. Both are created automatically and git-ignored; back up the whole `data/` folder to keep registrations and history.
+Registrations, seen-record state, bounties, rank-role IDs, birthdays, saved contacts, card collections, casino wallets and the open counting round live in `data/store.json`; draft tournament history lives in `data/draft-history.json`, and finished counting rounds in `data/count-history.json`. Both are created automatically and git-ignored; back up the whole `data/` folder to keep registrations and history.
 
 ## Notes
 

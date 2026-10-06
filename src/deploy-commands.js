@@ -9,6 +9,7 @@ import { contactCommandData } from './contacts.js';
 import { profileCommandData } from './profile.js';
 import { caseCommandData } from './cases.js';
 import { casinoCommandData } from './casino.js';
+import { countCommandData } from './counting.js';
 
 const body = [
   ...commandData(),
@@ -18,6 +19,7 @@ const body = [
   ...profileCommandData(),
   ...caseCommandData(),
   ...casinoCommandData(),
+  ...countCommandData(),
 ];
 const rest = new REST({ version: '10' }).setToken(config.token);
 

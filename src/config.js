@@ -71,6 +71,15 @@ export const config = {
   casinoDailyLossCap: Math.max(0, numberOr(process.env.CASINO_DAILY_LOSS_CAP, 20000)), // 0 = no cap
   casinoDuelMinutes: Math.max(1, numberOr(process.env.CASINO_DUEL_MINUTES, 5)), // a challenge expires after this
   casinoSpinMs: Math.max(0, numberOr(process.env.CASINO_SPIN_MS, 800)), // pause before a slots result
+  // Counting draw — members count up in order in a channel; when the range is
+  // full, three of them win. Reading typed numbers needs the Message Content
+  // privilege (Developer Portal → Bot → Privileged Gateway Intents).
+  countRoot: rootName(process.env.COUNT_COMMAND_ROOT, 'sgcount'),
+  countDailyLimit: Math.max(1, numberOr(process.env.COUNT_DAILY_LIMIT, 5)), // numbers per member per day
+  countNoDouble: (process.env.COUNT_NO_DOUBLE || 'false').toLowerCase() === 'true', // ban counting twice in a row
+  countDeleteWrong: (process.env.COUNT_DELETE_WRONG || 'false').toLowerCase() === 'true', // needs Manage Messages
+  countWeighted: (process.env.COUNT_WEIGHTED || 'true').toLowerCase() !== 'false', // each number is a ticket
+  countRevealMs: Math.max(0, numberOr(process.env.COUNT_REVEAL_MS, 2500)), // pause between the three winners
   // The day boundary for daily claims and drop caps — the server's own day.
   caseTimeZone: process.env.CASE_TIMEZONE?.trim() || process.env.BIRTHDAY_TIMEZONE?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone,
 };

@@ -33,6 +33,11 @@ let state = { guilds: {} };
 const HISTORY_FILE = path.join(DATA_DIR, 'draft-history.json');
 let history = { guilds: {} };
 
+// Counting rounds are a permanent record of who won real money, so they get the
+// same treatment: their own file, never rewritten by anything else.
+const COUNT_FILE = path.join(DATA_DIR, 'count-history.json');
+let countHistory = { guilds: {} };
+
 /**
  * Read a JSON file. Missing → null. Unreadable → the file is moved aside (never
  * overwritten) and null is returned; if it can't even be moved, refuse to start.
@@ -71,6 +76,11 @@ export function load() {
   if (!state.guilds) state.guilds = {};
   history = readJson(HISTORY_FILE) || { guilds: {} };
   if (!history.guilds) history.guilds = {};
+  countHistory = readJson(COUNT_FILE) || { guilds: {} };
+  if (!countHistory.guilds) countHistory.guilds = {};
+  for (const h of Object.values(countHistory.guilds)) {
+    h.nextId = Math.max(h.nextId || 1, ...h.rounds.map((r) => r.id + 1));
+  }
 
   // Tournament numbers must never be reused — even if the history file was
   // restored from an old backup while lobbies still point at newer numbers.
@@ -250,6 +260,30 @@ export function removeContact(guildId, kind, discordId) {
   delete all[discordId];
   persist();
   return existed;
+}
+
+// --- Counting draws: guild.counting holds the open round; finished rounds and
+// their winners are kept forever in data/count-history.json ---
+
+export function getCounting(guildId) {
+  return guild(guildId).counting || null;
+}
+
+export function setCounting(guildId, round) {
+  const g = guild(guildId);
+  if (round) g.counting = round;
+  else delete g.counting;
+  persist();
+}
+
+/** One server's finished rounds: { nextId, rounds: [oldest … newest] }. */
+export function getCountHistory(guildId) {
+  if (!countHistory.guilds[guildId]) countHistory.guilds[guildId] = { nextId: 1, rounds: [] };
+  return countHistory.guilds[guildId];
+}
+
+export function persistCountHistory() {
+  writeJson(COUNT_FILE, countHistory);
 }
 
 // --- Profile cards: guild.cards = { "<discordId>": { owned, equipped, seeds, … } } ---
