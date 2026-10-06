@@ -77,7 +77,10 @@ const TEAM_EMOJI = ['🔵', '🟠', '🟢', '🟣', '🔴', '🟡', '🟤', '⚪
 const MAX_WIN_ROWS = 4; // Discord allows 5 component rows; one is the control row
 // Actions that would change the teams — refused while a bracket is running, so
 // a leftover button can't wipe a tournament that's being played and recorded.
-const LOCKED_DURING_BRACKET = new Set(['draft', 'draftn', 'teams', 'swap', 'swapsel', 'bracket', 'pairsel']);
+const LOCKED_DURING_BRACKET = new Set([
+  'draft', 'draftn', 'teams', 'swap', 'swapsel', 'bracket', 'pairsel',
+  'friends', 'friendsel', 'friendclear',
+]);
 
 
 // ---------------------------------------------------------------------------
@@ -190,8 +193,7 @@ function lobbyEmbed(lobby, budget = EMBED_TOTAL) {
   let text = lobby.players.map((p, i) => line(p, i, true)).join('\n');
   if (text.length > room) text = lobby.players.map((p, i) => line(p, i, false)).join('\n');
   if (together.length) {
-    const named = (id) => safeName(lobby.players.find((p) => p.id === id)?.name, id);
-    const line2 = `\n\n🤝 **Together:** ${together.map((g) => g.map(named).join(' + ')).join(' · ')}`;
+    const line2 = `\n\n🤝 **Together:** ${groupsText(lobby)}`;
     if (text.length + line2.length <= room) text += line2;
   }
   if (text.length > room) {
@@ -393,12 +395,15 @@ function components(lobby) {
 
   if (lobby.result && fits(lobby) > 2) rows.push(teamCountMenu(lobby));
 
+  // Friends lives here rather than next to Swap: the main row is already five
+  // buttons once the teams are drawn, and Discord allows no more than five.
   const hostRow = new ActionRowBuilder().addComponents(
     button('notify', lobby.result ? 'Notify players' : 'Notify', ButtonStyle.Primary, { emoji: '📣' }),
     lobby.locked
       ? button('lock', 'Unlock', ButtonStyle.Secondary, { emoji: '🔓' })
       : button('lock', 'Lock', ButtonStyle.Secondary, { emoji: '🔒' }),
   );
+  if (lobby.players.length >= 2) hostRow.addComponents(button('friends', 'Friends', ButtonStyle.Secondary, { emoji: '🤝' }));
   if (lobby.result) {
     hostRow.addComponents(
       button('bracket', 'Start bracket', ButtonStyle.Success, { emoji: '🏁' }),
@@ -910,6 +915,50 @@ function swapMenu(lobby, lobbyId) {
   return [new ActionRowBuilder().addComponents(menu)];
 }
 
+/** Who can be grouped, and who they are already with. */
+function friendsMenu(lobby, lobbyId) {
+  const where = (p) => {
+    if (!lobby.result) return null;
+    const at = locate(lobby, p.id);
+    return at ? at.where : null;
+  };
+  const options = lobby.players.map((p) => {
+    const mates = (groupWith(lobby, p.id) || []).filter((id) => id !== p.id);
+    const named = mates.map((id) => lobby.players.find((x) => x.id === id)?.name ?? 'someone');
+    const place = where(p);
+    return {
+      label: `${place ? `${place} · ` : ''}${p.name}`.slice(0, 100),
+      description: (mates.length ? `with ${named.join(', ')}` : `AURA ${p.missing ? 'none' : p.label}${p.girl ? ' · girl' : ''}`).slice(0, 100),
+      value: p.id,
+    };
+  });
+
+  const menu = options.length <= 25 ? new StringSelectMenuBuilder().addOptions(options) : new UserSelectMenuBuilder();
+  menu
+    .setCustomId(`${PREFIX}friendsel|${lobbyId}`)
+    .setPlaceholder('Pick players who stay on the same team')
+    .setMinValues(2)
+    .setMaxValues(Math.min(TEAM_SIZE, Math.max(2, lobby.players.length)));
+
+  const rows = [new ActionRowBuilder().addComponents(menu)];
+  if ((lobby.groups || []).length) {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        button(`friendclear|${lobbyId}`, 'Clear all groups', ButtonStyle.Secondary, { emoji: '🧹' }),
+      ),
+    );
+  }
+  return rows;
+}
+
+/** "A + B · C + D", or null when nobody is grouped. */
+function groupsText(lobby) {
+  const groups = (lobby.groups || []).filter((g) => g.length > 1);
+  if (!groups.length) return null;
+  const named = (id) => safeName(lobby.players.find((p) => p.id === id)?.name, id);
+  return groups.map((g) => g.map(named).join(' + ')).join(' · ');
+}
+
 /**
  * The lobby message is gone (deleted in Discord): forget the lobby and close
  * its history record. Called from the MessageDelete event and failed edits.
@@ -1114,6 +1163,8 @@ async function handleLobbyAction(interaction) {
   // buttons are found by the message they sit on.
   const privateMenu = [
     'swapsel',
+    'friendsel',
+    'friendclear',
     'draftn',
     'closeok',
     'closekeep',
@@ -1352,6 +1403,70 @@ async function handleLobbyAction(interaction) {
         content: 'Pick **two players** to swap — they trade places (team ↔ team, or with someone sitting out).',
         components: swapMenu(lobby, lobbyId),
       });
+
+    case 'friends':
+      return interaction.reply({
+        flags: MessageFlags.Ephemeral,
+        content:
+          'Pick the players who should always end up on the **same team**. ' +
+          `A group can be up to ${TEAM_SIZE}; picking someone who is already in a group joins the two together.` +
+          (groupsText(lobby) ? `\n\n🤝 Right now: ${groupsText(lobby)}` : ''),
+        components: friendsMenu(lobby, lobbyId),
+        allowedMentions: { parse: [] },
+      });
+
+    case 'friendsel': {
+      const ids = [...new Set(interaction.values)];
+      const missing = ids.filter((id) => !lobby.players.some((p) => p.id === id));
+      let error = null;
+      let merged = [];
+      if (missing.length) {
+        error = `${missing.map((id) => `<@${id}>`).join(' and ')} ${missing.length > 1 ? "aren't" : "isn't"} in this lobby.`;
+      } else {
+        merged = keepTogether(lobby, ids);
+        if (merged.length > TEAM_SIZE) {
+          splitFrom(lobby, ids[0]);
+          error = `That would make a group of ${merged.length}, and a team only holds ${TEAM_SIZE}.`;
+        }
+      }
+      // Teams drawn before the group existed no longer honour it.
+      const redraw = !error && Boolean(lobby.result);
+      if (redraw) resetTeams(lobby);
+      if (!error) saveAll();
+
+      const named = (id) => safeName(lobby.players.find((p) => p.id === id)?.name, id);
+      await interaction
+        .update({
+          content: error
+            ? `❌ ${error}`
+            : `🤝 **${merged.map(named).join(' + ')}** will be drafted onto the same team.` +
+              (redraw ? '\nThe teams were cleared — press **Draft** again.' : '') +
+              `\n\nRight now: ${groupsText(lobby) ?? 'nobody grouped'}`,
+          components: friendsMenu(lobby, lobbyId),
+          allowedMentions: { parse: [] },
+        })
+        .catch((err) => console.error('Friends menu: could not answer:', err.message));
+      if (!error) await refreshLobbyMessage(interaction.channel, lobby).catch(() => {});
+      return undefined;
+    }
+
+    case 'friendclear': {
+      const had = (lobby.groups || []).length;
+      lobby.groups = [];
+      const redraw = Boolean(lobby.result);
+      if (redraw) resetTeams(lobby);
+      saveAll();
+      await interaction
+        .update({
+          content:
+            `🧹 Cleared ${had} group(s) — everybody can be drafted anywhere again.` +
+            (redraw ? '\nThe teams were cleared — press **Draft** again.' : ''),
+          components: friendsMenu(lobby, lobbyId),
+        })
+        .catch(() => {});
+      await refreshLobbyMessage(interaction.channel, lobby).catch(() => {});
+      return undefined;
+    }
 
     case 'swapsel': {
       const [idA, idB] = interaction.values;
