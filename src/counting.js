@@ -245,6 +245,11 @@ async function cmdOpen(interaction) {
   if (perms && !perms.has(PermissionFlagsBits.AddReactions)) {
     return ephemeral(interaction, `❌ I need **Add Reactions** in ${channel} to mark numbers right or wrong.`);
   }
+  const ping = interaction.options.getString('ping') ?? 'everyone';
+  // @everyone renders whether or not the bot may ping, so a missing permission
+  // would look like it worked while nobody was actually notified.
+  const canPing = !perms || perms.has(PermissionFlagsBits.MentionEveryone);
+  const silent = ping !== 'none' && !canPing;
 
   const history = store.getCountHistory(interaction.guildId);
   const round = {
@@ -267,9 +272,20 @@ async function cmdOpen(interaction) {
   const prizes = round.prizes.some(Boolean)
     ? round.prizes.map((p, i) => `${PLACES[i]} ${p || '—'}`).join('\n')
     : '_Set when the winners are announced._';
-  await interaction.reply({ flags: MessageFlags.Ephemeral, content: `✅ Round #${round.id} is open in ${channel}.` });
+  await interaction.reply({
+    flags: MessageFlags.Ephemeral,
+    content:
+      `✅ Round #${round.id} is open in ${channel}.` +
+      (silent ? `\n⚠️ I don't have **Mention @everyone** there, so the announcement will post but won't notify anyone.` : ''),
+  });
+
+  const mention = ping === 'everyone' ? '@everyone' : ping === 'here' ? '@here' : '';
   return channel
     .send({
+      content: mention
+        ? `${mention} 🔢 **Counting is open — ${number(from)} to ${number(to)}!**`
+        : `🔢 **Counting is open — ${number(from)} to ${number(to)}!**`,
+      allowedMentions: { parse: mention ? ['everyone'] : [] },
       embeds: [
         new EmbedBuilder()
           .setColor(GOLD)
@@ -451,6 +467,12 @@ const data = new SlashCommandBuilder()
       .addIntegerOption((o) => o.setName('to').setDescription('Last number — the draw happens when it is reached').setRequired(true).setMinValue(1))
       .addChannelOption((o) => o.setName('channel').setDescription('Where to count (default: here)').addChannelTypes(ChannelType.GuildText))
       .addStringOption((o) => o.setName('title').setDescription('What to call this round'))
+      .addStringOption((o) =>
+        o
+          .setName('ping')
+          .setDescription('Who to notify when it opens (default: @everyone)')
+          .addChoices({ name: '@everyone', value: 'everyone' }, { name: '@here', value: 'here' }, { name: 'Nobody', value: 'none' }),
+      )
       .addStringOption((o) => o.setName('prize1').setDescription('First prize, e.g. 100,000₮'))
       .addStringOption((o) => o.setName('prize2').setDescription('Second prize'))
       .addStringOption((o) => o.setName('prize3').setDescription('Third prize')),
