@@ -553,6 +553,12 @@ async function cmdOpen(interaction) {
     for (const m of recent.values()) {
       if (m.author?.bot && m.author.id !== interaction.client.user.id) others.set(m.author.id, m.author.username);
     }
+    // A bot that has since been removed leaves its messages behind. Those are
+    // history, not a conflict, so only warn about bots still in the server.
+    for (const id of [...others.keys()]) {
+      const present = await interaction.guild.members.fetch(id).then(() => true).catch(() => false);
+      if (!present) others.delete(id);
+    }
     if (others.size) {
       warnings.push(
         `**${[...others.values()].join(', ')}** ${others.size > 1 ? 'are' : 'is'} also posting in ${channel}. ` +
