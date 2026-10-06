@@ -19,6 +19,7 @@ const PLACES = ['🥇 1st', '🥈 2nd', '🥉 3rd'];
 const GOLD = 0xf1c40f;
 const GREY = 0x9aa0a6;
 
+const warnedCannotDelete = new Set(); // one log line per channel, not per message
 const sleep = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
 const isAdmin = (interaction) => Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild));
 const ephemeral = (interaction, content) => interaction.reply({ flags: MessageFlags.Ephemeral, content });
@@ -55,10 +56,10 @@ export function offerNumber(guildId, { userId, text, bot }) {
   if (!round || round.status !== 'open') return { ignore: true };
   if (bot) return { ignore: true };
 
-  // Only a bare number is an attempt to count. Anything else is just chat and
-  // is left alone — a counting channel is still a channel.
+  // Only a bare number is an attempt to count. Anything else is chat, which the
+  // caller clears out so the channel stays a clean run of numbers.
   const cleaned = String(text ?? '').trim().replace(/[,\s_]/g, '');
-  if (!/^\d{1,15}$/.test(cleaned)) return { ignore: true };
+  if (!/^\d{1,15}$/.test(cleaned)) return { chat: true };
   const value = Number(cleaned);
 
   if (value !== round.next) return { wrong: true, expected: round.next, got: value };
@@ -190,10 +191,33 @@ export async function announceDraw(channel, record) {
  * Called for every message in a guild. Does nothing unless it lands in the
  * channel of an open round.
  */
+// When each member was last reminded that the channel is numbers only, so a
+// chatty evening doesn't turn into the bot talking to itself.
+const reminded = new Map();
+const NOTICE_COOLDOWN_MS = 60 * 1000;
+
+function shouldRemind(userId) {
+  const last = reminded.get(userId) || 0;
+  if (Date.now() - last < NOTICE_COOLDOWN_MS) return false;
+  if (reminded.size > 200) reminded.clear();
+  reminded.set(userId, Date.now());
+  return true;
+}
+
+/** Say something in the channel and take it back a few seconds later. */
+async function fleeting(channel, content, userId, ms = 8000) {
+  const sent = await channel
+    .send({ content, allowedMentions: { users: userId ? [userId] : [] } })
+    .catch(() => null);
+  if (sent) setTimeout(() => sent.delete().catch(() => {}), ms);
+}
+
 export async function onCountingMessage(message, client) {
   try {
     const round = message.guildId && store.getCounting(message.guildId);
     if (!round || round.status !== 'open' || message.channelId !== round.channelId) return;
+    // Pins, joins and the like are Discord's own messages, not someone chatting.
+    if (message.system) return;
 
     const result = offerNumber(message.guildId, {
       userId: message.author?.id,
@@ -201,6 +225,23 @@ export async function onCountingMessage(message, client) {
       bot: message.author?.bot,
     });
     if (result.ignore) return;
+
+    // Anything that isn't a number: the channel is for counting only.
+    if (result.chat) {
+      if (!config.countNumbersOnly) return;
+      const gone = await message.delete().then(() => true).catch(() => false);
+      if (!gone) {
+        if (!warnedCannotDelete.has(message.channelId)) {
+          warnedCannotDelete.add(message.channelId);
+          console.warn(`Counting channel ${message.channelId}: cannot delete chat — I need Manage Messages there.`);
+        }
+        return;
+      }
+      if (shouldRemind(message.author.id)) {
+        await fleeting(message.channel, `<@${message.author.id}> this channel is for counting only — the next number is **${number(round.next)}**.`, message.author.id);
+      }
+      return;
+    }
 
     if (result.accepted) {
       await message.react('✅').catch(() => {});
@@ -213,12 +254,7 @@ export async function onCountingMessage(message, client) {
 
     await message.react(result.wrong ? '❌' : '🚫').catch(() => {});
     if (config.countDeleteWrong) await message.delete().catch(() => {});
-    if (result.refused) {
-      await message.channel
-        .send({ content: `<@${message.author.id}> ${result.message}`, allowedMentions: { users: [message.author.id] } })
-        .then((m) => setTimeout(() => m.delete().catch(() => {}), 10000))
-        .catch(() => {});
-    }
+    if (result.refused) await fleeting(message.channel, `<@${message.author.id}> ${result.message}`, message.author.id, 10000);
   } catch (err) {
     console.error('Counting message failed:', err.message);
   }
@@ -244,6 +280,13 @@ async function cmdOpen(interaction) {
   const perms = me && channel.permissionsFor(me);
   if (perms && !perms.has(PermissionFlagsBits.AddReactions)) {
     return ephemeral(interaction, `❌ I need **Add Reactions** in ${channel} to mark numbers right or wrong.`);
+  }
+  if (config.countNumbersOnly && perms && !perms.has(PermissionFlagsBits.ManageMessages)) {
+    return ephemeral(
+      interaction,
+      `❌ I need **Manage Messages** in ${channel} to keep it numbers-only.\n` +
+        'Give me that permission there, or set `COUNT_NUMBERS_ONLY=false` to let people chat in the counting channel.',
+    );
   }
   const ping = interaction.options.getString('ping') ?? 'everyone';
   // @everyone renders whether or not the bot may ping, so a missing permission
@@ -296,6 +339,7 @@ async function cmdOpen(interaction) {
               `Type **${number(from)}** to start. If you type anything other than the next number, it doesn't count.`,
               '',
               `• Up to **${config.countDailyLimit}** numbers each per day`,
+              config.countNumbersOnly ? '• **Numbers only** here — anything else is removed' : null,
               config.countNoDouble ? '• You can\'t take two in a row' : null,
               `• When **${number(to)}** is reached, three of you win — drawn 3rd, 2nd, then 1st`,
               `• Every number you hold is a ticket, so counting more often is worth more`,

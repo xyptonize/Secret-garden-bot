@@ -197,7 +197,8 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `COUNT_DAILY_LIMIT` | — | `5` | Numbers one member may claim per day. |
 | `COUNT_WEIGHTED` | — | `true` | Every number held is a ticket. `false` = one entry per member. |
 | `COUNT_NO_DOUBLE` | — | `false` | `true` stops anyone taking two numbers in a row. |
-| `COUNT_DELETE_WRONG` | — | `false` | `true` deletes wrong numbers (needs Manage Messages). |
+| `COUNT_NUMBERS_ONLY` | — | `true` | Deletes anything that isn't a number in the counting channel (needs Manage Messages). |
+| `COUNT_DELETE_WRONG` | — | `false` | `true` also deletes wrong numbers instead of just marking them ❌. |
 | `COUNT_REVEAL_MS` | — | `2500` | Pause between revealing 3rd, 2nd and 1st. |
 | `CS2KZ_API_BASE` | — | `https://api.cs2kz.org` | API base URL. |
 
@@ -356,7 +357,7 @@ Games that span several presses (mines, blackjack) keep their state in `data/sto
 
 ## Counting draw (`/sgcount`)
 
-An admin opens a round over a range — say **1 to 500**. The bot announces it with **@everyone**, names the range, and posts the rules; members then count up **in order** in that channel. Type the next number and it's yours (✅); type anything else and it doesn't count (❌). Ordinary chat in the channel is ignored, not marked wrong. Each member may claim **5 numbers a day** (`COUNT_DAILY_LIMIT`).
+An admin opens a round over a range — say **1 to 500**. The bot announces it with **@everyone**, names the range, and posts the rules; members then count up **in order** in that channel. Type the next number and it's yours (✅); type a different number and it doesn't count (❌). **Anything that isn't a number is deleted** — the channel stays a clean run of numbers — and the member is told once (at most once a minute) what the next number is. The bot needs **Manage Messages** there; `/sgcount open` refuses up front if it doesn't have it, rather than letting chat pile up. Each member may claim **5 numbers a day** (`COUNT_DAILY_LIMIT`).
 
 When the last number is claimed the bot draws **three different members** and reveals them in suspense order: 🥉 third, then 🥈 second, then 🥇 first — the biggest prize last. Every number you hold is a ticket, so counting more often is worth more (`COUNT_WEIGHTED=false` for one entry per member regardless).
 

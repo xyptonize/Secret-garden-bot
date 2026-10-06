@@ -77,7 +77,8 @@ export const config = {
   countRoot: rootName(process.env.COUNT_COMMAND_ROOT, 'sgcount'),
   countDailyLimit: Math.max(1, numberOr(process.env.COUNT_DAILY_LIMIT, 5)), // numbers per member per day
   countNoDouble: (process.env.COUNT_NO_DOUBLE || 'false').toLowerCase() === 'true', // ban counting twice in a row
-  countDeleteWrong: (process.env.COUNT_DELETE_WRONG || 'false').toLowerCase() === 'true', // needs Manage Messages
+  countNumbersOnly: (process.env.COUNT_NUMBERS_ONLY || 'true').toLowerCase() !== 'false', // delete chat in the counting channel
+  countDeleteWrong: (process.env.COUNT_DELETE_WRONG || 'false').toLowerCase() === 'true', // also delete wrong numbers
   countWeighted: (process.env.COUNT_WEIGHTED || 'true').toLowerCase() !== 'false', // each number is a ticket
   countRevealMs: Math.max(0, numberOr(process.env.COUNT_REVEAL_MS, 2500)), // pause between the three winners
   // The day boundary for daily claims and drop caps — the server's own day.
