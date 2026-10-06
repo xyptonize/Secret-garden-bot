@@ -177,6 +177,7 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `DRAFT_DEFAULT_AURA` | — | `5.5` | AURA for players with no AURA role. |
 | `DRAFT_STICKY_SECONDS` | — | `5` | Keep open lobbies at the bottom of their channel: re-post after this many quiet seconds (0 = off). |
 | `DRAFT_RESHUFFLE_TOLERANCE` | — | `1` | How far from the best split a Reshuffle may go. |
+| `STAFF_ROLES` | — | — | Roles (names or ids) that may override the ordinary rules — currently taking over a `/sgdraft` lobby from an active host. The server owner always can. Unset = anyone with Manage Server. |
 | `PHONE_ROLES` | — | — | Roles (names or ids, comma separated) allowed to see and list phone numbers. The server owner always can. Unset = anyone with Manage Server. |
 | `CASE_COMMAND_ROOT` | — | `sgcase` | Parent command for the card/case commands. |
 | `CASE_DAILY_SEEDS` | — | `25` | Seeds paid with the free daily case. |

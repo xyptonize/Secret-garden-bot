@@ -34,6 +34,7 @@ import {
 import { config } from './config.js';
 import { awardChampions } from './cases.js';
 import { settleMatch, refundLobby } from './betting.js';
+import { isStaff, staffText } from './staff.js';
 import * as store from './store.js';
 import {
   draft,
@@ -61,6 +62,7 @@ import {
   gameCommand,
   statsCommand,
   topCommand,
+  handleHistoryButton,
 } from './draftHistory.js';
 
 const PREFIX = 'sgdraft|';
@@ -1213,6 +1215,11 @@ async function bumpLobby(channel, key, lobby, force = false) {
 
 /** Every lobby action goes through here, so each change is saved to disk. */
 export async function handleDraftButton(interaction) {
+  // History pages have no lobby behind them, so they are answered before any of
+  // the lobby plumbing below goes looking for one.
+  if (interaction.customId.startsWith(`${PREFIX}hist|`)) {
+    return handleHistoryButton(interaction, interaction.customId.slice(`${PREFIX}hist|`.length).split('|'));
+  }
   const clicked = interaction.message?.id;
   const before = lobbyByMessage(clicked);
   try {
@@ -1917,13 +1924,18 @@ async function hostCommand(interaction) {
   const user = interaction.options.getUser('user', true);
   if (user.bot) return ephemeral(interaction, "A bot can't host.");
 
-  // The host hands over their own lobby. An admin may only take over a lobby
-  // whose host is gone — otherwise only the host decides.
+  // The host hands over their own lobby. Staff — owners and developers — can
+  // take one over outright, for the evening when the host has wandered off mid
+  // tournament and nobody can do anything. Everyone else waits for the host to
+  // actually be gone.
+  const staff = isStaff(interaction);
   let target = here.find(([, l]) => l.hostId === me);
-  if (!target && !isAdmin(interaction)) {
+  const seized = !target && staff ? here[0] : null;
+  if (!target && !seized && !isAdmin(interaction)) {
     return ephemeral(interaction, `Only the host (<@${here[0][1].hostId}>) can hand the lobby over.`);
   }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if (seized) target = seized;
   if (!target) {
     for (const entry of here) {
       try {
@@ -1954,11 +1966,15 @@ async function hostCommand(interaction) {
   store.persist();
   await refreshLobbyMessage(interaction.channel, lobby);
   await say(interaction, `✅ ${user} is now the host of **${lobby.title}**.`);
-  // Out in the open, so a replaced host knows.
+  // Out in the open, so a replaced host knows — and so a lobby taken from an
+  // active host is taken in front of everybody, not quietly.
+  const taken = seized && oldHost !== me;
   return interaction
     .followUp({
-      content: `👑 ${user} is now the host of **${lobby.title}** (was <@${oldHost}>).`,
-      allowedMentions: { users: [user.id, oldHost] },
+      content: taken
+        ? `👑 <@${me}> took over **${lobby.title}** from <@${oldHost}> and made ${user} the host.`
+        : `👑 ${user} is now the host of **${lobby.title}** (was <@${oldHost}>).`,
+      allowedMentions: { users: [user.id, oldHost, me] },
     })
     .catch(() => {});
 }

@@ -8,9 +8,13 @@
 // A bracket that is cancelled or closed before any result is dropped; one with
 // at least one result is kept, marked cancelled, since those matches were played.
 
-import { EmbedBuilder, MessageFlags, escapeMarkdown, embedLength } from 'discord.js';
+import { EmbedBuilder, MessageFlags, escapeMarkdown, embedLength, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import * as store from './store.js';
+import { config } from './config.js';
 import { teamTotal, champion, roundName } from './draftBalance.js';
+
+// The same prefix draft.js uses, so its router sees these presses.
+const DRAFT_PREFIX = 'sgdraft|';
 
 const PAGE_SIZE = 10;
 const EMBED_TOTAL = 6000; // Discord's limit on all embeds in one message, combined
@@ -202,12 +206,16 @@ const modeLabel = (mode) =>
 
 function statusText(record) {
   if (record.status === 'finished') {
-    const team = record.teams[record.champion - 1];
+    // Defensive: one malformed record shouldn't take the whole history page
+    // down with it, and these are kept forever across many versions.
+    const team = record.teams?.[record.champion - 1];
+    if (!team?.players) return `🏆 ${record.champion ? teamName(record.champion) : 'winner'} (lineup not recorded)`;
     const names = team.players.map((p) => safeName(p.name, p.id)).join(', ');
     return `🏆 ${teamName(record.champion)}: ${names}`;
   }
-  if (record.status === 'cancelled') return `⏹ cancelled after ${record.matches.length} match(es)`;
-  return `⏳ in progress · ${record.matches.length} match(es) played`;
+  const played = record.matches?.length ?? 0;
+  if (record.status === 'cancelled') return `⏹ cancelled after ${played} match(es)`;
+  return `⏳ in progress · ${played} match(es) played`;
 }
 
 /**
@@ -285,26 +293,22 @@ const ephemeral = (interaction, content) =>
   interaction.reply({ flags: MessageFlags.Ephemeral, content, allowedMentions: { parse: [] } });
 
 /** /sgdraft history [user] [page] — newest first. */
-export async function historyCommand(interaction) {
-  const user = interaction.options.getUser('user');
-  const page = Math.max(1, interaction.options.getInteger('page') || 1);
-  let list = store.getDraftHistory(interaction.guildId).tournaments.slice().reverse();
-  if (user) list = list.filter((t) => teamOf(t, user.id));
+/**
+ * One page of the history, with the buttons to walk through it. `who` is the
+ * member it is filtered to, or null for everyone's.
+ */
+export function historyView(guildId, { page = 1, who = null, name = null } = {}) {
+  let list = store.getDraftHistory(guildId).tournaments.slice().reverse();
+  if (who) list = list.filter((t) => teamOf(t, who));
+  if (!list.length) return null;
 
-  if (!list.length) {
-    return ephemeral(
-      interaction,
-      user ? `${user} hasn't played in any recorded tournament yet.` : 'No tournaments recorded yet.',
-    );
-  }
-
-  const pages = Math.ceil(list.length / PAGE_SIZE);
-  const shown = list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  if (!shown.length) return ephemeral(interaction, `There are only ${pages} page(s).`);
+  const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const at = Math.min(Math.max(1, page), pages);
+  const shown = list.slice((at - 1) * PAGE_SIZE, at * PAGE_SIZE);
 
   const entries = shown.map((t) => {
     const head = `**#${t.id}** · <t:${unix(t.startedAt)}:d> · **${escapeMarkdown(t.title)}** · ${t.teams.length} teams`;
-    const mine = user ? ` · ${finishOf(t, user.id)}` : '';
+    const mine = who ? ` · ${finishOf(t, who)}` : '';
     return `${head}${mine}\n${statusText(t)}`;
   });
   // Whole entries only — never cut one in half.
@@ -317,10 +321,52 @@ export async function historyCommand(interaction) {
 
   const embed = new EmbedBuilder()
     .setColor(0x9b59b6)
-    .setTitle(user ? `📜 Tournament history — ${user.displayName ?? user.username}` : '📜 Tournament history')
+    .setTitle(name ? `📜 Tournament history — ${name}` : '📜 Tournament history')
     .setDescription(description)
-    .setFooter({ text: `Page ${Math.min(page, pages)}/${pages} · ${list.length} tournament(s) · /sgdraft game <id> for details` });
-  return interaction.reply({ embeds: [embed], allowedMentions: { parse: [] } });
+    .setFooter({ text: `Page ${at}/${pages} · ${list.length} tournament(s) · /${config.draftRoot} game <id> for details` });
+
+  const components = [];
+  if (pages > 1) {
+    // The page and the filter ride on the buttons, so anyone can page through a
+    // history somebody else posted without it changing under them.
+    const id = (p) => `${DRAFT_PREFIX}hist|${p}|${who ?? ''}`;
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(id(at - 1)).setLabel('Previous').setEmoji('◀️').setStyle(ButtonStyle.Secondary).setDisabled(at <= 1),
+        new ButtonBuilder().setCustomId(id(at + 1)).setLabel('Next').setEmoji('▶️').setStyle(ButtonStyle.Secondary).setDisabled(at >= pages),
+      ),
+    );
+  }
+  return { embeds: [embed], components, allowedMentions: { parse: [] } };
+}
+
+export async function historyCommand(interaction) {
+  const user = interaction.options.getUser('user');
+  const view = historyView(interaction.guildId, {
+    page: Math.max(1, interaction.options.getInteger('page') || 1),
+    who: user?.id ?? null,
+    name: user ? (user.displayName ?? user.username) : null,
+  });
+  if (!view) {
+    return ephemeral(
+      interaction,
+      user ? `${user} hasn't played in any recorded tournament yet.` : 'No tournaments recorded yet.',
+    );
+  }
+  return interaction.reply(view);
+}
+
+/** A Previous/Next press on a history page. */
+export async function handleHistoryButton(interaction, [rawPage, who]) {
+  const page = Math.max(1, Number(rawPage) || 1);
+  let name = null;
+  if (who) {
+    const member = await interaction.guild?.members?.fetch(who).catch(() => null);
+    name = member?.displayName ?? null;
+  }
+  const view = historyView(interaction.guildId, { page, who: who || null, name });
+  if (!view) return interaction.update({ content: 'That history is gone.', embeds: [], components: [] });
+  return interaction.update(view);
 }
 
 /** One tournament as an embed; `name` prints a player (with or without their saved name). */
