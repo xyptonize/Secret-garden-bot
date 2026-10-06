@@ -35,6 +35,15 @@ export const config = {
   // CS2 team drafter — reads "AURA - x" roles (lower = stronger).
   draftRoot: rootName(process.env.DRAFT_COMMAND_ROOT, 'sgdraft'),
   draftGirlRole: process.env.DRAFT_GIRL_ROLE?.trim() || 'HOT GIRLS🎀', // role name or id
+  // Whoever holds one of these roles sits out first when the numbers don't
+  // divide evenly — before anyone else, however late they joined. Names or ids,
+  // comma separated; a name also matches roles that start with it, so
+  // "Сануулга" covers Сануулга 1, 2 and 3. A trailing number is read as a
+  // level: a higher one sits out before a lower one.
+  draftSitOutRoles: (process.env.DRAFT_SITOUT_ROLES || process.env.DRAFT_SITOUT_ROLE || 'Сануулга,sanuulga')
+    .split(',')
+    .map((r) => r.trim())
+    .filter(Boolean),
   draftAuraGod: numberOr(process.env.DRAFT_AURA_GOD, 0),
   draftAuraKing: numberOr(process.env.DRAFT_AURA_KING, 0.5),
   draftDefaultAura: numberOr(process.env.DRAFT_DEFAULT_AURA, 5.5), // players with no AURA role

@@ -179,7 +179,8 @@ function improve(teams) {
 
 /**
  * Draft players (in join order) into `teamCount` teams of 5. Anyone past the
- * last full team sits out. With no teamCount, as many teams as the players fill.
+ * last full team sits out — players marked `sitOut` first, whenever they are.
+ * With no teamCount, as many teams as the players fill.
  *
  * The first draft picks the most even lineup found. A reshuffle picks any
  * lineup within `tolerance` of the best spread that hasn't been shown yet.
@@ -194,8 +195,16 @@ export function draft(
   const count = Math.min(teamCount || fits, fits);
   if (count < 2) return { teams: [], benched: players, spread: 0, key: '', broken: [] };
 
-  const playing = players.slice(0, count * TEAM_SIZE);
-  const benched = players.slice(count * TEAM_SIZE);
+  // Whoever is marked to sit out goes to the back of the queue, so when the
+  // numbers don't divide evenly it is them who miss out rather than whoever
+  // happened to join last. Among themselves, and among everyone else, join
+  // order still decides.
+  // Flagged players go last, and among them the higher level goes last of all,
+  // so Сануулга 3 sits out before Сануулга 1. Join order breaks the rest.
+  const flagged = players.filter((p) => p.sitOut).sort((a, b) => (a.sitOut || 0) - (b.sitOut || 0));
+  const queue = [...players.filter((p) => !p.sitOut), ...flagged];
+  const playing = queue.slice(0, count * TEAM_SIZE);
+  const benched = queue.slice(count * TEAM_SIZE);
 
   // Only groups whose members are all actually playing can be honoured; and a
   // group of more than a team can never be. Biggest first, because if some have

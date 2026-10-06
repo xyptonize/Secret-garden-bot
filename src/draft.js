@@ -101,11 +101,30 @@ function auraFromRoleName(name) {
 }
 
 /** A member's draft profile. Several AURA roles → the strongest (lowest) wins. */
+const sameRole = (role, wanted) => role.id === wanted || role.name?.toLowerCase() === String(wanted).toLowerCase();
+
+/**
+ * How strongly a role says "sit this one out": 0 for not at all, otherwise the
+ * number on the end of the role name (Сануулга 3 → 3), or 1 if it has none.
+ * Matching by prefix means one setting covers a whole tier of roles.
+ */
+function sitOutLevel(role) {
+  for (const wanted of config.draftSitOutRoles) {
+    if (role.id === wanted) return Number(/(\d+)\s*$/.exec(role.name || '')?.[1]) || 1;
+    const name = (role.name || '').toLowerCase();
+    const want = String(wanted).toLowerCase();
+    if (name === want || name.startsWith(want)) return Number(/(\d+)\s*$/.exec(role.name || '')?.[1]) || 1;
+  }
+  return 0;
+}
+
 function profileOf(member) {
   let best = null;
   let girl = false;
+  let sitOut = 0;
   for (const role of member.roles.cache.values()) {
-    if (role.id === config.draftGirlRole || role.name === config.draftGirlRole) girl = true;
+    if (sameRole(role, config.draftGirlRole)) girl = true;
+    sitOut = Math.max(sitOut, sitOutLevel(role));
     const a = auraFromRoleName(role.name);
     if (a && (!best || a.aura < best.aura)) best = a;
   }
@@ -116,6 +135,7 @@ function profileOf(member) {
     label: best ? best.label : '',
     missing: !best,
     girl,
+    sitOut,
   };
 }
 
@@ -158,7 +178,7 @@ const fits = (lobby) => Math.min(MAX_TEAMS, Math.floor(lobby.players.length / TE
 
 /** "AURA 3.5 · 🎀" */
 function statsLine(p) {
-  return `${p.missing ? '❔ no AURA' : `AURA **${p.label}**`}${p.girl ? ' · 🎀' : ''}`;
+  return `${p.missing ? '❔ no AURA' : `AURA **${p.label}**`}${p.girl ? ' · 🎀' : ''}${p.sitOut ? ` · 💤${p.sitOut > 1 ? p.sitOut : ''}` : ''}`;
 }
 
 /**
