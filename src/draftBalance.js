@@ -63,23 +63,78 @@ function pickSeeds(players, count, rng) {
 }
 
 /**
+ * Players who asked to stay together are drafted as one lump — a "unit" — so no
+ * step of the draft can put them on different teams. On their own, every player
+ * is a unit of one and everything below behaves exactly as it did before.
+ */
+function unitsOf(players, groupOf) {
+  const byGroup = new Map();
+  const units = [];
+  for (const p of players) {
+    const g = groupOf?.get(p.id) ?? null;
+    if (g === null) {
+      units.push({ players: [p], size: 1, girls: p.girl ? 1 : 0, aura: p.aura, group: null, seeded: false });
+      continue;
+    }
+    if (!byGroup.has(g)) {
+      const unit = { players: [], size: 0, girls: 0, aura: 0, group: g, seeded: false };
+      byGroup.set(g, unit);
+      units.push(unit);
+    }
+    const unit = byGroup.get(g);
+    unit.players.push(p);
+    unit.size += 1;
+    unit.girls += p.girl ? 1 : 0;
+    unit.aura += p.aura;
+  }
+  return units;
+}
+
+const unitTotal = (team) => team.reduce((s, u) => s + u.aura, 0);
+const unitSize = (team) => team.reduce((s, u) => s + u.size, 0);
+const unitGirls = (team) => team.reduce((s, u) => s + u.girls, 0);
+
+/**
  * Random start that already obeys both rules: one seed per team, then girls
  * to whichever teams have the fewest (counts differ by ≤ 1), then the rest.
+ *
+ * Units are placed largest first — a group of three is far harder to fit than a
+ * lone player, and leaving it late is how you end up with nowhere to put it.
+ * Returns null when this particular order painted itself into a corner; the
+ * caller simply tries again.
  */
-function randomStart(players, count, seeds, rng) {
+function randomStart(units, count, rng) {
   const teams = Array.from({ length: count }, () => []);
-  const isSeed = (p) => seeds.has(p.id);
-  shuffle(players.filter(isSeed), rng).forEach((s, i) => teams[i].push(s));
+  const room = (t) => TEAM_SIZE - unitSize(t);
+  const emptiest = (a, b) => room(b) - room(a);
 
-  const girlsIn = (t) => t.filter((p) => p.girl).length;
-  for (const g of shuffle(players.filter((p) => p.girl && !isSeed(p)), rng)) {
-    const open = shuffle(teams.filter((t) => t.length < TEAM_SIZE), rng);
-    open.sort((a, b) => girlsIn(a) - girlsIn(b));
-    open[0].push(g);
+  /**
+   * Put a unit on the best team that has room for it. `rank` says what "best"
+   * means for this pass; room is always the tie-break, because leaving the
+   * fullest teams alone is what keeps later units fittable.
+   */
+  const place = (unit, rank) => {
+    const open = shuffle(teams, rng).filter((t) => room(t) >= unit.size);
+    if (!open.length) return false;
+    open.sort(rank);
+    open[0].push(unit);
+    return true;
+  };
+
+  const order = shuffle(units, rng).sort((a, b) => b.size - a.size);
+  // Seeded units first, each on a team of its own where that is possible.
+  const hasSeed = (t) => (t.some((x) => x.seeded) ? 1 : 0);
+  for (const unit of order.filter((u) => u.seeded)) {
+    if (!place(unit, (a, b) => hasSeed(a) - hasSeed(b) || emptiest(a, b))) return null;
   }
-  const others = shuffle(players.filter((p) => !p.girl && !isSeed(p)), rng);
-  for (const team of teams) while (team.length < TEAM_SIZE) team.push(others.pop());
-  return teams;
+  // Then girls, to whichever team has the fewest so far.
+  for (const unit of order.filter((u) => !u.seeded && u.girls)) {
+    if (!place(unit, (a, b) => unitGirls(a) - unitGirls(b) || emptiest(a, b))) return null;
+  }
+  for (const unit of order.filter((u) => !u.seeded && !u.girls)) {
+    if (!place(unit, emptiest)) return null;
+  }
+  return teams.every((t) => unitSize(t) === TEAM_SIZE) ? teams : null;
 }
 
 /**
@@ -87,8 +142,8 @@ function randomStart(players, count, seeds, rng) {
  * and seed↔seed or non-seed↔non-seed — which keeps both rules intact, until no
  * swap lowers the variance of the team totals.
  */
-function improve(teams, seeds) {
-  const totals = teams.map(teamTotal);
+function improve(teams) {
+  const totals = teams.map(unitTotal);
   const mean = totals.reduce((a, b) => a + b, 0) / teams.length;
   const sq = (x) => (x - mean) ** 2;
 
@@ -96,11 +151,14 @@ function improve(teams, seeds) {
     improved = false;
     for (let i = 0; i < teams.length; i++) {
       for (let j = i + 1; j < teams.length; j++) {
-        for (let x = 0; x < TEAM_SIZE; x++) {
-          for (let y = 0; y < TEAM_SIZE; y++) {
+        for (let x = 0; x < teams[i].length; x++) {
+          for (let y = 0; y < teams[j].length; y++) {
             const p = teams[i][x];
             const q = teams[j][y];
-            if (p.girl !== q.girl || seeds.has(p.id) !== seeds.has(q.id) || p.aura === q.aura) continue;
+            // Like for like, so every rule the start obeyed still holds: the
+            // same number of players, the same number of girls, and a seed only
+            // ever changes places with another seed.
+            if (p.size !== q.size || p.girls !== q.girls || p.seeded !== q.seeded || p.aura === q.aura) continue;
             const d = q.aura - p.aura;
             const before = sq(totals[i]) + sq(totals[j]);
             const after = sq(totals[i] + d) + sq(totals[j] - d);
@@ -130,22 +188,50 @@ function improve(teams, seeds) {
  */
 export function draft(
   players,
-  { teamCount, reshuffle = false, avoid = new Set(), current = null, tolerance = 1, rng = Math.random } = {},
+  { teamCount, reshuffle = false, avoid = new Set(), current = null, tolerance = 1, rng = Math.random, groups = [] } = {},
 ) {
   const fits = Math.min(MAX_TEAMS, Math.floor(players.length / TEAM_SIZE));
   const count = Math.min(teamCount || fits, fits);
-  if (count < 2) return { teams: [], benched: players, spread: 0, key: '' };
+  if (count < 2) return { teams: [], benched: players, spread: 0, key: '', broken: [] };
 
   const playing = players.slice(0, count * TEAM_SIZE);
   const benched = players.slice(count * TEAM_SIZE);
 
-  const found = new Map(); // key -> lineup
-  for (let r = 0; r < RESTARTS; r++) {
-    const seeds = pickSeeds(playing, count, rng);
-    const teams = improve(randomStart(playing, count, seeds, rng), seeds);
-    const key = lineupKey(teams);
-    if (!found.has(key)) found.set(key, { teams, spread: spreadOf(teams), stack: stackOf(teams), key });
+  // Only groups whose members are all actually playing can be honoured; and a
+  // group of more than a team can never be. Biggest first, because if some have
+  // to give way it should be the ones that constrain the draft most.
+  const inPlay = new Set(playing.map((p) => p.id));
+  const wanted = groups
+    .map((g) => [...new Set(g)].filter((id) => inPlay.has(id)))
+    .filter((g) => g.length > 1)
+    .sort((a, b) => b.length - a.length);
+  const impossible = wanted.filter((g) => g.length > TEAM_SIZE);
+  let honour = wanted.filter((g) => g.length <= TEAM_SIZE);
+  const broken = [...impossible];
+
+  let found = new Map();
+  for (;;) {
+    const groupOf = new Map();
+    honour.forEach((g, i) => g.forEach((id) => groupOf.set(id, i)));
+    found = new Map(); // key -> lineup
+
+    for (let r = 0; r < RESTARTS; r++) {
+      const seeds = pickSeeds(playing, count, rng);
+      const units = unitsOf(playing, groupOf);
+      for (const u of units) u.seeded = u.players.some((p) => seeds.has(p.id));
+      const start = randomStart(units, count, rng);
+      if (!start) continue; // this order didn't fit; try another
+      const teams = improve(start).map((t) => t.flatMap((u) => u.players));
+      const key = lineupKey(teams);
+      if (!found.has(key)) found.set(key, { teams, spread: spreadOf(teams), stack: stackOf(teams), key });
+    }
+    if (found.size || !honour.length) break;
+    // Nothing fits with every group kept together. Give up the largest one —
+    // it is the one making the sizes impossible — and say so afterwards.
+    broken.push(honour[0]);
+    honour = honour.slice(1);
   }
+  if (!found.size) return { teams: [], benched: players, spread: 0, key: '', broken };
 
   const lineups = [...found.values()];
   const best = Math.min(...lineups.map((l) => l.spread));
@@ -159,7 +245,7 @@ export function draft(
   const leastStacked = Math.max(...candidates.map((l) => l.stack));
   const pool = candidates.filter((l) => l.stack >= leastStacked - EPS);
   const chosen = pool[Math.floor(rng() * pool.length)];
-  return { teams: chosen.teams, benched, spread: chosen.spread, key: chosen.key };
+  return { teams: chosen.teams, benched, spread: chosen.spread, key: chosen.key, broken };
 }
 
 // ---------------------------------------------------------------------------

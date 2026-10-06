@@ -169,6 +169,14 @@ export function drawWinners(round, { weighted = config.countWeighted } = {}) {
  * lose who won.
  */
 export function settleRound(guildId, round, { cancelled = false } = {}) {
+  // Claim the round before doing anything with it. A fill is announced over
+  // several awaits, and an admin pressing close in that window would otherwise
+  // draw it a second time: two records, two announcements, two sets of winners.
+  const live = store.getCounting(guildId);
+  if (!live || live.settling || (round && live.id !== round.id)) return null;
+  live.settling = true;
+  round = live;
+
   const picks = cancelled ? [] : drawWinners(round);
   // Drawn first → third place, last drawn → first.
   const results = picks.map((t, i) => ({
@@ -185,8 +193,9 @@ export function settleRound(guildId, round, { cancelled = false } = {}) {
   const unlucky = results.filter((r) => r.forfeited);
 
   const history = store.getCountHistory(guildId);
+  const { settling, ...saved } = round;
   const record = {
-    ...round,
+    ...saved,
     id: round.id,
     status: cancelled ? 'cancelled' : 'finished',
     endedAt: new Date().toISOString(),
@@ -318,6 +327,12 @@ export async function onCountingMessage(message, client) {
     if (!round || round.status !== 'open' || message.channelId !== round.channelId) return;
     // Pins, joins and the like are Discord's own messages, not someone chatting.
     if (message.system) return;
+    // No text and nothing attached is not something a member can actually post.
+    // It is, however, exactly what every message looks like if the Message
+    // Content privilege is ever revoked — and treating that as chat would
+    // delete the channel and strike out the whole server in one evening.
+    const posted = (message.attachments?.size ?? 0) > 0 || (message.stickers?.size ?? 0) > 0 || (message.embeds?.length ?? 0) > 0;
+    if (!String(message.content ?? '').trim() && !posted) return;
 
     const result = offerNumber(message.guildId, {
       userId: message.author?.id,
@@ -342,10 +357,12 @@ export async function onCountingMessage(message, client) {
     }
 
     if (result.accepted) {
+      // Settled first, reacted second: nothing may come between claiming the
+      // last number and the round being drawn.
+      const settled = result.filled ? settleRound(message.guildId, result.round) : null;
       await message.react('✅').catch(() => {});
-      if (result.filled) {
-        const { record } = settleRound(message.guildId, result.round);
-        await announceDraw(message.channel, record).catch((err) => console.error('Draw announcement failed:', err.message));
+      if (settled) {
+        await announceDraw(message.channel, settled.record).catch((err) => console.error('Draw announcement failed:', err.message));
       }
       return;
     }
@@ -596,12 +613,14 @@ async function cmdClose(interaction) {
   if (!isAdmin(interaction)) return ephemeral(interaction, '🔒 Only admins (Manage Server) can close a round.');
   const round = store.getCounting(interaction.guildId);
   if (!round) return ephemeral(interaction, 'No round is running.');
+  if (round.status !== 'open') return ephemeral(interaction, '⏳ That round is being drawn right now.');
   if (!countOf(round)) return ephemeral(interaction, `Nobody has counted yet — use \`/${config.countRoot} cancel\` to drop the round.`);
 
   await interaction.reply({ flags: MessageFlags.Ephemeral, content: `🎲 Drawing round #${round.id} early…` });
-  const { record } = settleRound(interaction.guildId, round);
+  const settled = settleRound(interaction.guildId, round);
+  if (!settled) return undefined; // something else drew it first
   const channel = await interaction.client.channels.fetch(round.channelId).catch(() => interaction.channel);
-  if (channel) await announceDraw(channel, record).catch((err) => console.error('Draw announcement failed:', err.message));
+  if (channel) await announceDraw(channel, settled.record).catch((err) => console.error('Draw announcement failed:', err.message));
   return undefined;
 }
 
@@ -609,7 +628,10 @@ async function cmdCancel(interaction) {
   if (!isAdmin(interaction)) return ephemeral(interaction, '🔒 Only admins (Manage Server) can cancel a round.');
   const round = store.getCounting(interaction.guildId);
   if (!round) return ephemeral(interaction, 'No round is running.');
-  const { record } = settleRound(interaction.guildId, round, { cancelled: true });
+  if (round.status !== 'open') return ephemeral(interaction, '⏳ That round is being drawn right now.');
+  const settled = settleRound(interaction.guildId, round, { cancelled: true });
+  if (!settled) return ephemeral(interaction, 'That round was just settled.');
+  const { record } = settled;
   return interaction.reply(`🚫 Round #${record.id} cancelled — ${number(record.claimed)} number(s) were claimed, nobody was drawn.`);
 }
 

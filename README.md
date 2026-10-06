@@ -223,6 +223,8 @@ Every day at `BIRTHDAY_HOUR` (default 09:00) in `BIRTHDAY_TIMEZONE` (default: th
 | `/sgdraft start [title] [join]` | anyone | Open a lobby in this channel. The number of teams is decided at Draft, once everyone has joined. |
 | `/sgdraft add <user>` / `/sgdraft kick <user>` | host | Add or remove a player in this channel's lobby. |
 | `/sgdraft swap <player1> <player2>` | host | Swap two drafted players (between teams, or with someone sitting out). |
+| `/sgdraft friends <a> <b> [c] [d] [e]` | 👑 host | Keep those players on the same team in every draft and reshuffle. Merges with a group they're already in. |
+| `/sgdraft unfriends <user>` | 👑 host | Let a player be drafted anywhere again. |
 | `/sgdraft aura [user]` | anyone | Show a player's AURA (and 🎀) as the drafter reads it. |
 | `/sgdraft mock count:<n>` / `clear:True` | host | Add fake players (🧪 Mock 01, …) to test the whole flow in Discord, or remove them. A lobby with mock players is a **test lobby**: its brackets are never saved to history. |
 | `/sgdraft sub <out> <in>` | host | Replace a player who can't continue, even mid-tournament (same as the 🔁 Sub button). |

@@ -185,9 +185,15 @@ function lobbyEmbed(lobby, budget = EMBED_TOTAL) {
     });
 
   if (!n) return embed.setDescription('_Nobody yet — click **Join**._');
+  const together = (lobby.groups || []).filter((g) => g.length > 1);
   const room = Math.min(4096, budget - embedLength(embed.data) - 50);
   let text = lobby.players.map((p, i) => line(p, i, true)).join('\n');
   if (text.length > room) text = lobby.players.map((p, i) => line(p, i, false)).join('\n');
+  if (together.length) {
+    const named = (id) => safeName(lobby.players.find((p) => p.id === id)?.name, id);
+    const line2 = `\n\n🤝 **Together:** ${together.map((g) => g.map(named).join(' + ')).join(' · ')}`;
+    if (text.length + line2.length <= room) text += line2;
+  }
   if (text.length > room) {
     const kept = [];
     let used = 0;
@@ -459,18 +465,35 @@ async function runDraft(lobby, guild, reshuffle) {
     avoid: new Set(lobby.shown),
     current: lobby.shown.at(-1),
     tolerance: config.draftReshuffleTolerance,
+    groups: lobby.groups || [],
   });
   lobby.result = result.teams.length ? { teams: result.teams, benched: result.benched } : null;
+  // Groups that couldn't be kept together, so the host can be told rather than
+  // left wondering why two friends ended up apart.
+  lobby.brokenGroups = (result.broken || []).map((g) => [...g]);
   lobby.shown = [...lobby.shown, result.key].slice(-SHOWN_LIMIT);
   lobby.edited = false;
   return gone;
 }
 
+/** Groups the last draft had to break, worded for the host. */
+function brokenGroupsNote(lobby) {
+  const broken = lobby.brokenGroups || [];
+  if (!broken.length) return '';
+  const named = (id) => safeName(lobby.players.find((p) => p.id === id)?.name, id);
+  return (
+    `\n🤝 Couldn't keep ${broken.map((g) => g.map(named).join(' + ')).join(' and ')} together — ` +
+    'the group sizes leave no way to fill every team. Change the number of teams, or use ' +
+    `\`/${config.draftRoot} unfriends\`.`
+  );
+}
+
 /** Tell the host what a Draft/Reshuffle couldn't do: skipped, or players who left. */
-function notifyAfterDraft(interaction, gone) {
+function notifyAfterDraft(interaction, gone, lobby = null) {
   let content = null;
   if (gone === null) content = 'The lobby changed while the teams were loading (a bracket started or it was closed) — nothing was redrafted.';
   else if (gone.length) content = `Removed ${gone.map((id) => `<@${id}>`).join(', ')} — no longer in the server.`;
+  if (lobby) content = `${content || ''}${brokenGroupsNote(lobby)}`.trim() || null;
   if (!content) return undefined;
   return interaction
     .followUp({ flags: MessageFlags.Ephemeral, content, allowedMentions: { parse: [] } })
@@ -563,6 +586,7 @@ function removePlayer(lobby, id) {
   const before = lobby.players.length;
   lobby.players = lobby.players.filter((p) => p.id !== id);
   if (lobby.players.length === before) return null;
+  tidyGroups(lobby); // someone who left can't be kept with anybody
   if (!lobby.result) return 'lobby';
   const onTeam = lobby.result.teams.some((t) => t.some((p) => p.id === id));
   if (onTeam) {
@@ -586,6 +610,45 @@ function resetTeams(lobby) {
   lobby.edited = false;
   lobby.shown = [];
   if (open) saveAll();
+}
+
+// --- friends who want to stay on the same team -----------------------------
+
+const groupsOf = (lobby) => (lobby.groups ||= []);
+
+/** The group a member is in, or null. */
+const groupWith = (lobby, id) => groupsOf(lobby).find((g) => g.includes(id)) || null;
+
+/**
+ * Keep these members together. Anyone already in a group brings their group
+ * with them, so asking for A+B when B is already with C makes one group of
+ * three rather than quietly dropping C.
+ */
+function keepTogether(lobby, ids) {
+  const wanted = new Set(ids);
+  for (const id of ids) for (const mate of groupWith(lobby, id) || []) wanted.add(mate);
+  lobby.groups = groupsOf(lobby).filter((g) => !g.some((id) => wanted.has(id)));
+  const merged = [...wanted];
+  lobby.groups.push(merged);
+  return merged;
+}
+
+/** Take a member out of whatever group they're in. A pair left alone is no group. */
+function splitFrom(lobby, id) {
+  const group = groupWith(lobby, id);
+  if (!group) return null;
+  const rest = group.filter((x) => x !== id);
+  lobby.groups = groupsOf(lobby).filter((g) => g !== group);
+  if (rest.length > 1) lobby.groups.push(rest);
+  return group;
+}
+
+/** Drop anyone who has left the lobby, and any group that is down to one. */
+function tidyGroups(lobby) {
+  const here = new Set(lobby.players.map((p) => p.id));
+  lobby.groups = groupsOf(lobby)
+    .map((g) => g.filter((id) => here.has(id)))
+    .filter((g) => g.length > 1);
 }
 
 /** Every place a drafted player can be: each team, plus the bench. */
@@ -1171,7 +1234,7 @@ async function handleLobbyAction(interaction) {
       const gone = await runDraft(lobby, interaction.guild, false);
       if (gone === null) lobby.teamCount = previous; // skipped: leave everything as it was
       await interaction.editReply(view(lobby));
-      return notifyAfterDraft(interaction, gone);
+      return notifyAfterDraft(interaction, gone, lobby);
     }
 
     case 'draft': {
@@ -1192,7 +1255,7 @@ async function handleLobbyAction(interaction) {
       const gone = await runDraft(lobby, interaction.guild, Boolean(lobby.result));
       if (gone === null) lobby.teamCount = previous;
       await interaction.editReply(view(lobby));
-      return notifyAfterDraft(interaction, gone);
+      return notifyAfterDraft(interaction, gone, lobby);
     }
 
     case 'draftn': {
@@ -1227,8 +1290,7 @@ async function handleLobbyAction(interaction) {
           components: [],
         })
         .catch(() => {});
-      if (gone?.length) return notifyAfterDraft(interaction, gone);
-      return undefined;
+      return notifyAfterDraft(interaction, gone, lobby);
     }
 
     case 'sub':
@@ -1868,10 +1930,77 @@ const rootBuilder = new SlashCommandBuilder()
       .setName('aura')
       .setDescription("Show a player's AURA and stats as the drafter sees them.")
       .addUserOption((o) => o.setName('user').setDescription('Player (default: you)')),
+  )
+  .addSubcommand((s) => {
+    s.setName('friends').setDescription('(Host) Keep these players on the same team');
+    s.addUserOption((o) => o.setName('user').setDescription('Player').setRequired(true));
+    s.addUserOption((o) => o.setName('user2').setDescription('Player').setRequired(true));
+    for (const n of ['user3', 'user4', 'user5']) s.addUserOption((o) => o.setName(n).setDescription('Also with them'));
+    return s;
+  })
+  .addSubcommand((s) =>
+    s
+      .setName('unfriends')
+      .setDescription('(Host) Let a player be drafted anywhere again')
+      .addUserOption((o) => o.setName('user').setDescription('Player').setRequired(true)),
   );
+
+/** Host: keep these members on the same team when the draft runs. */
+async function friends(interaction) {
+  const found = hostLobby(interaction);
+  if (!found) return undefined;
+  const lobby = found.lobby;
+  const ids = ['user', 'user2', 'user3', 'user4', 'user5']
+    .map((name) => interaction.options.getUser(name))
+    .filter(Boolean)
+    .map((u) => u.id);
+  const unique = [...new Set(ids)];
+  if (unique.length < 2) return ephemeral(interaction, 'Name at least two players to keep together.');
+
+  const missing = unique.filter((id) => !lobby.players.some((p) => p.id === id));
+  if (missing.length) {
+    return ephemeral(interaction, `${missing.map((id) => `<@${id}>`).join(' and ')} ${missing.length > 1 ? "aren't" : "isn't"} in this lobby.`);
+  }
+  const merged = keepTogether(lobby, unique);
+  if (merged.length > TEAM_SIZE) {
+    splitFrom(lobby, unique[0]);
+    return ephemeral(interaction, `❌ That would make a group of ${merged.length}, and a team only holds ${TEAM_SIZE}.`);
+  }
+  // Teams already drawn were drawn without this: they have to be redrawn.
+  const redraw = Boolean(lobby.result);
+  if (redraw) resetTeams(lobby);
+  saveAll();
+  await refreshLobbyMessage(interaction.channel, lobby).catch(() => {});
+  return interaction.reply({
+    content:
+      `🤝 ${merged.map((id) => `<@${id}>`).join(' + ')} will be drafted onto the same team.` +
+      (redraw ? '\nThe teams were cleared — press **Draft** again.' : ''),
+    allowedMentions: { parse: [] },
+  });
+}
+
+/** Host: let a member be drafted anywhere again. */
+async function unfriends(interaction) {
+  const found = hostLobby(interaction);
+  if (!found) return undefined;
+  const lobby = found.lobby;
+  const user = interaction.options.getUser('user', true);
+  const group = splitFrom(lobby, user.id);
+  if (!group) return ephemeral(interaction, `<@${user.id}> isn't being kept with anyone.`);
+  const redraw = Boolean(lobby.result);
+  if (redraw) resetTeams(lobby);
+  saveAll();
+  await refreshLobbyMessage(interaction.channel, lobby).catch(() => {});
+  return interaction.reply({
+    content: `🤝 <@${user.id}> can be drafted anywhere again.` + (redraw ? '\nThe teams were cleared — press **Draft** again.' : ''),
+    allowedMentions: { parse: [] },
+  });
+}
 
 const handlers = {
   start,
+  friends,
+  unfriends,
   add: (i) => editPlayers(i, true),
   kick: (i) => editPlayers(i, false),
   swap,
