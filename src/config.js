@@ -40,6 +40,9 @@ export const config = {
   // comma separated; a name also matches roles that start with it, so
   // "Сануулга" covers Сануулга 1, 2 and 3. A trailing number is read as a
   // level: a higher one sits out before a lower one.
+  // Joining a draft requires a saved phone number (/sgphone set), so the host
+  // can reach everybody about the game they signed up for.
+  draftRequirePhone: (process.env.DRAFT_REQUIRE_PHONE || 'true').toLowerCase() !== 'false',
   draftSitOutRoles: (process.env.DRAFT_SITOUT_ROLES || process.env.DRAFT_SITOUT_ROLE || 'Сануулга,sanuulga')
     .split(',')
     .map((r) => r.trim())

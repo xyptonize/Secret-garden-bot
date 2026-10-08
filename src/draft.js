@@ -199,6 +199,7 @@ function lobbyEmbed(lobby, budget = EMBED_TOTAL) {
 
   const n = lobby.players.length;
   const need = n < MIN_PLAYERS ? ` · need ${MIN_PLAYERS - n} more` : '';
+  const phoneNote = config.draftRequirePhone ? ` · 📱 /${config.phoneRoot} set needed to join` : '';
   const teams = lobby.result ? `${lobby.result.teams.length} teams` : 'host picks the number of teams at Draft';
   const embed = new EmbedBuilder()
     .setColor(lobby.closed ? 0x95a5a6 : 0xe67e22)
@@ -206,7 +207,7 @@ function lobbyEmbed(lobby, budget = EMBED_TOTAL) {
     .setFooter({
       text:
         `${lobby.test ? '🧪 test lobby, results not saved · ' : ''}${lobby.locked ? '🔒 locked · ' : ''}` +
-        `${n} player(s) joined${need} · ${teams} · host: ${lobby.hostName}`,
+        `${n} player(s) joined${need} · ${teams} · host: ${lobby.hostName}${phoneNote}`,
     });
 
   if (!n) return embed.setDescription('_Nobody yet — click **Join**._');
@@ -600,6 +601,21 @@ export const lobbyView = (lobby) => view(lobby);
  * so a late Join never destroys teams that are already made — the host decides
  * whether to Reshuffle them in or bring them on with Sub.
  */
+/**
+ * Why someone can't join, or null. A saved phone number is the price of entry:
+ * the host needs a way to reach the people who signed up for the game.
+ */
+function joinBlocked(guildId, userId) {
+  if (!config.draftRequirePhone) return null;
+  if (store.getContacts(guildId, 'phone')[userId]) return null;
+  return (
+    `📱 You need a phone number saved before you can join a draft.\n` +
+    `Run \`/${config.phoneRoot} set\` — it takes 8 digits like \`9911 2233\`.\n\n` +
+    `_It stays private: every reply about it is only visible to you, it never appears in a channel, ` +
+    `and only the owner and developer roles can look it up._`
+  );
+}
+
 function addPlayer(lobby, profile) {
   lobby.players.push(profile);
   if (lobby.result) lobby.result.benched.push(profile);
@@ -1303,6 +1319,8 @@ async function handleLobbyAction(interaction) {
     }
     if (lobby.bracket) return ephemeral(interaction, 'The bracket has started — joining is closed.');
     if (lobby.locked) return ephemeral(interaction, '🔒 The host locked this lobby — ask them to unlock it or add you.');
+    const blocked = joinBlocked(interaction.guildId, interaction.user.id);
+    if (blocked) return ephemeral(interaction, blocked);
     const me = profileOf(interaction.member);
     const drafted = Boolean(lobby.result);
     addPlayer(lobby, me);
@@ -1485,6 +1503,15 @@ async function handleLobbyAction(interaction) {
       }
       const answer = (payload) => (interaction.deferred ? interaction.editReply(payload) : interaction.update(payload));
       if (!incoming) return answer({ content: 'That player is no longer sitting out.', components: [] });
+      if (joinBlocked(interaction.guildId, incoming.id)) {
+        return answer({
+          content:
+            `📱 <@${incoming.id}> has no phone number saved, so they can't be subbed in. ` +
+            `Ask them to run \`/${config.phoneRoot} set\` first.`,
+          components: [],
+          allowedMentions: { parse: [] },
+        });
+      }
       // The lobby may have changed while we looked them up.
       if (store.getDraftLobbies()[lobbyId] !== lobby) return answer({ content: 'That lobby was closed.', components: [] });
       const done = applySub(lobby, outId, incoming);
@@ -1842,6 +1869,13 @@ async function editPlayers(interaction, add) {
     if (store.getDraftLobbies()[key] !== lobby) return say(interaction, 'That lobby was closed.');
     if (lobby.bracket) return say(interaction, 'The bracket has started — cancel it before changing players.');
     if (lobby.players.some((p) => p.id === user.id)) return say(interaction, `${user} is already in.`);
+    if (joinBlocked(interaction.guildId, user.id)) {
+      return say(
+        interaction,
+        `📱 ${user} has no phone number saved, so they can't be added. ` +
+          `Ask them to run \`/${config.phoneRoot} set\` — it's private, and only the owner and developer roles can see it.`,
+      );
+    }
     addPlayer(lobby, profileOf(member));
   } else {
     was = removePlayer(lobby, user.id); // 'team' | 'bench' | 'lobby'
@@ -1908,6 +1942,13 @@ async function subCommand(interaction) {
     }
   }
   if (store.getDraftLobbies()[key] !== lobby) return say(interaction, 'That lobby was closed.');
+  if (joinBlocked(interaction.guildId, inUser.id)) {
+    return say(
+      interaction,
+      `📱 ${inUser} has no phone number saved, so they can't be subbed in. ` +
+        `Ask them to run \`/${config.phoneRoot} set\` first.`,
+    );
+  }
   const done = applySub(lobby, out.id, incoming);
   if (done.error) return say(interaction, `❌ ${done.error}`);
   // Answer the private deferred reply first: a follow-up sent straight after a

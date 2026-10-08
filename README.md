@@ -175,6 +175,7 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `BIRTHDAY_HOUR` | — | `9` | Hour (0–23) the birthday message is posted. |
 | `BIRTHDAY_TIMEZONE` | — | server timezone | IANA timezone for the hour above, e.g. `Asia/Ulaanbaatar`. |
 | `DRAFT_GIRL_ROLE` | — | `HOT GIRLS🎀` | Role (name or id) marking girl players for the drafter. |
+| `DRAFT_REQUIRE_PHONE` | — | `true` | Joining a draft needs a saved phone number (`/sgphone set`). `false` lets anyone join. |
 | `DRAFT_SITOUT_ROLES` | — | `Сануулга,sanuulga` | Roles whose holders sit out first when the numbers don't divide evenly. Names match by prefix, so one entry covers `Сануулга 1/2/3`, and a trailing number is read as a level — a higher one sits out before a lower one. |
 | `DRAFT_AURA_GOD` / `DRAFT_AURA_KING` | — | `0` / `0.5` | AURA values of the GOD and KING roles. |
 | `DRAFT_DEFAULT_AURA` | — | `5.5` | AURA for players with no AURA role. |
@@ -249,6 +250,8 @@ Every day at `BIRTHDAY_HOUR` (default 09:00) in `BIRTHDAY_TIMEZONE` (default: th
 | `/sgdraft top` | anyone | Leaderboard: most titles, then most match wins. |
 
 **1. Lobby.** Players click **Join** and get a private confirmation ("✅ You joined … as player #3 · AURA 3.5"). Pressing Join again tells them they're already in and which number they are. Each player is listed by name with their AURA and 🎀, read from their roles. A player with no AURA role counts as `DRAFT_DEFAULT_AURA` (5.5) and is marked ❔.
+
+**Joining needs a phone number** saved with `/sgphone set` (`DRAFT_REQUIRE_PHONE`), so the host can reach the people who signed up. Anyone without one is turned away from **Join** with instructions, and the lobby footer says so. The host can't work around it either — `/sgdraft add` and `/sgdraft sub` check the same thing — because a rule with a hole in it isn't one. The number stays private: only the owner and developer roles can ever see it.
 
 **2. Teams.** Nobody knows in advance how many will show up, so the team count isn't set up front. When the host presses **Draft**, the bot privately asks **"How many teams?"** and lists only what the turnout allows. For example, 17 players gives *2 teams (10 play · 7 sit out)* or *3 teams (15 play · 2 sit out)*. With 10–14 players 2 teams is the only option, so it drafts right away. The last to join sit out, and the host can Swap anyone in. After the draft, a menu on the lobby lets the host change the number of teams (it redrafts). Draft balances every team against every other by total AURA, so the *spread* (highest − lowest total) is as small as possible. AURA is the raw role number: `AURA - GOD` = `DRAFT_AURA_GOD` (0), `AURA - KING` = `DRAFT_AURA_KING` (0.5), and roles are re-read at every draft. Up to 24 teams.
 - **Top tiers are split up.** With N teams, the N strongest players each lead a different team. With 4 teams and GOD, KING, 1, 1.5 on top, each of them is on another team. A tie at the cutoff (two 1.5s for the last spot) is broken at random. Among equally balanced lineups the bot also picks the least stacked one, so a spare strong player goes to a team led by a weaker top player, never to GOD's.

@@ -124,6 +124,12 @@ const TOPICS = {
       'Opens a lobby, waits for people to join, then splits them into even teams by AURA and runs a knockout bracket — keeping a permanent record of who played and who won.',
     sections: [
       {
+        name: 'Before you can join',
+        value:
+          `You need a phone number saved — \`/${R.phoneRoot} set\`, 8 digits like \`9911 2233\`. It is how the host reaches the people who signed up.\n` +
+          'It stays private: replies about it are only visible to you, it never appears in a channel, and only the owner and developer roles can look it up.',
+      },
+      {
         name: 'How a night runs',
         value:
           `**1.** \`/${R.draftRoot} start\` — a lobby appears and stays at the bottom of the channel as people chat.\n` +
