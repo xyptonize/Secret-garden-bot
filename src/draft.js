@@ -1833,12 +1833,23 @@ async function start(interaction) {
     edited: false,
     closed: false,
   };
-  if (interaction.options.getBoolean('join') !== false) lobby.players.push(profileOf(interaction.member));
+  // Starting a lobby is not a way around the phone rule: the host is a player
+  // like everyone else. The lobby still opens — they may be running it for
+  // other people — they just aren't in it until they save a number.
+  const wantsToPlay = interaction.options.getBoolean('join') !== false;
+  const hostBlocked = wantsToPlay ? joinBlocked(interaction.guildId, interaction.user.id) : null;
+  if (wantsToPlay && !hostBlocked) lobby.players.push(profileOf(interaction.member));
 
   const message = await interaction.reply({ ...view(lobby), withResponse: true });
   lobby.key = message.resource.message.id; // fixed for the lobby's whole life
   lobby.messageId = lobby.key; // changes whenever it moves to the bottom
   store.getDraftLobbies()[lobby.key] = lobby;
+
+  if (hostBlocked) {
+    await interaction
+      .followUp({ flags: MessageFlags.Ephemeral, content: `The lobby is open, but **you're not in it yet**.\n\n${hostBlocked}` })
+      .catch(() => {});
+  }
 }
 
 /** Private reply for a deferred slash command. */
