@@ -175,7 +175,7 @@ The bot polls the CS2KZ API every `POLL_INTERVAL_SECONDS` (default 120). When yo
 | `BIRTHDAY_HOUR` | — | `9` | Hour (0–23) the birthday message is posted. |
 | `BIRTHDAY_TIMEZONE` | — | server timezone | IANA timezone for the hour above, e.g. `Asia/Ulaanbaatar`. |
 | `DRAFT_GIRL_ROLE` | — | `HOT GIRLS🎀` | Role (name or id) marking girl players for the drafter. |
-| `DRAFT_REQUIRE_PHONE` | — | `true` | Joining a draft needs a saved phone number (`/sgphone set`). `false` lets anyone join. |
+| `DRAFT_REQUIRE_PHONE` | — | `true` | Joining a draft needs a saved phone number (`/sgphone set`) — a verified one when `VERIFY_MN_API_KEY` is set. `false` lets anyone join. |
 | `DRAFT_SITOUT_ROLES` | — | `Сануулга,sanuulga` | Roles whose holders sit out first when the numbers don't divide evenly. Names match by prefix, so one entry covers `Сануулга 1/2/3`, and a trailing number is read as a level — a higher one sits out before a lower one. |
 | `DRAFT_AURA_GOD` / `DRAFT_AURA_KING` | — | `0` / `0.5` | AURA values of the GOD and KING roles. |
 | `DRAFT_DEFAULT_AURA` | — | `5.5` | AURA for players with no AURA role. |
@@ -251,7 +251,7 @@ Every day at `BIRTHDAY_HOUR` (default 09:00) in `BIRTHDAY_TIMEZONE` (default: th
 
 **1. Lobby.** Players click **Join** and get a private confirmation ("✅ You joined … as player #3 · AURA 3.5"). Pressing Join again tells them they're already in and which number they are. Each player is listed by name with their AURA and 🎀, read from their roles. A player with no AURA role counts as `DRAFT_DEFAULT_AURA` (5.5) and is marked ❔.
 
-**Joining needs a phone number** saved with `/sgphone set` (`DRAFT_REQUIRE_PHONE`), so the host can reach the people who signed up. Anyone without one is turned away from **Join** with instructions, and the lobby footer says so. The host can't work around it either — `/sgdraft add` and `/sgdraft sub` check the same thing — because a rule with a hole in it isn't one. The number stays private: only the owner and developer roles can ever see it.
+**Joining needs a phone number** saved with `/sgphone set` (`DRAFT_REQUIRE_PHONE`), so the host can reach the people who signed up. With SMS verification on (`VERIFY_MN_API_KEY`) the number must be a **verified** one: a number saved before verification existed no longer gets anyone in until its owner runs `/sgphone set` again and passes the SMS check. Anyone without one is turned away from **Join** with instructions, and the lobby footer says so. The host can't work around it either — `/sgdraft add` and `/sgdraft sub` check the same thing — because a rule with a hole in it isn't one. The number stays private: only the owner and developer roles can ever see it.
 
 **2. Teams.** Nobody knows in advance how many will show up, so the team count isn't set up front. When the host presses **Draft**, the bot privately asks **"How many teams?"** and lists only what the turnout allows. For example, 17 players gives *2 teams (10 play · 7 sit out)* or *3 teams (15 play · 2 sit out)*. With 10–14 players 2 teams is the only option, so it drafts right away. The last to join sit out, and the host can Swap anyone in. After the draft, a menu on the lobby lets the host change the number of teams (it redrafts). Draft balances every team against every other by total AURA, so the *spread* (highest − lowest total) is as small as possible. AURA is the raw role number: `AURA - GOD` = `DRAFT_AURA_GOD` (0), `AURA - KING` = `DRAFT_AURA_KING` (0.5), and roles are re-read at every draft. Up to 24 teams.
 - **Top tiers are split up.** With N teams, the N strongest players each lead a different team. With 4 teams and GOD, KING, 1, 1.5 on top, each of them is on another team. A tie at the cutoff (two 1.5s for the last spot) is broken at random. Among equally balanced lineups the bot also picks the least stacked one, so a spare strong player goes to a team led by a weaker top player, never to GOD's.
@@ -301,7 +301,7 @@ Members save their own; `/sgig` is public, `/sgphone` is private.
 | `/sgig view [user]` | anyone | Show someone's handle as a clickable link (public reply). |
 | `/sgig list` | anyone | Everyone's handles. |
 | `/sgig remove [user]` | anyone / admins | Remove yours; admins can remove anyone's. |
-| `/sgphone set <value>` | anyone | Save your number. Accepts 8 digits (`9911 2233` → `+976 9911 2233`), `+976…`, `00976…` or any international `+…` number. |
+| `/sgphone set <value>` | anyone | Save your number. Accepts 8 digits (`9911 2233` → `+976 9911 2233`), `+976…`, `00976…` or any international `+…` number. With `VERIFY_MN_API_KEY` set it is saved only after an SMS check — see below. |
 | `/sgphone view [user]` | you / `PHONE_ROLES` | **Private reply.** Only you can see your own; only the allowed roles can look up someone else's. |
 | `/sgphone list` | `PHONE_ROLES` | **Private reply.** Everyone's numbers. Anyone else gets "🔒 Phone numbers are private — only @OWNER👻, @Discord Developer, @Developer can list them". |
 | `/sgphone remove [user]` | anyone / admins | Remove yours; admins can remove anyone's. |
@@ -309,6 +309,10 @@ Members save their own; `/sgig` is public, `/sgphone` is private.
 | `/sgsteam view [user]` / `list` / `remove [user]` | anyone | Same as `/sgig`, public. |
 
 **Who can see a number** is set by `PHONE_ROLES` in `.env` — role names or ids, comma separated — plus the server owner, who always can. It is currently **OWNER👻, Discord Developer, Developer**. This is deliberately narrower than "admins": Manage Server is held by six member roles here and a dozen bot integrations, which is far more people than should see a phone list. Leaving `PHONE_ROLES` unset falls back to anyone with Manage Server.
+
+**Numbers are verified by SMS** when `VERIFY_MN_API_KEY` is set (a key from the [verify.mn](https://verify.mn/) Developer Console), because people were saving numbers that don't exist. `/sgphone set` — and the phone button on the profile card — then replies with a six-digit code to text to **144773** *from that phone*. The bot checks every 3 seconds and saves the number the moment the text arrives; if nothing comes within 5 minutes, nothing is saved. The SMS is an ordinary paid one (about 150₮, charged to the member by their operator). Only `+976` numbers can be verified, so international numbers are refused while this is on. If verify.mn is unreachable the number is not saved either — the check never fails open.
+
+Numbers saved before verification was turned on stay where they are — though they no longer count for joining a draft — and `/sgphone view` and `/sgphone list` mark each one ✅ or **⚠️ not verified**, so the allowed roles can see which to chase up or `/sgphone remove`. Without the key, numbers are saved as typed.
 
 Every `/sgphone` reply is ephemeral, so a number is never posted into a channel. Numbers and handles live in `data/store.json` (mode 600, owner tengis.g) and are included in the daily backup. Set `PHONE_COUNTRY_CODE` / `PHONE_LOCAL_DIGITS` in `.env` for another country (defaults `+976` and 8).
 

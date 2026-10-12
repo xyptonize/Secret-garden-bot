@@ -14,6 +14,7 @@ import {
   reconcileLobbies,
 } from './draft.js';
 import { contactCommands } from './contacts.js';
+import { resumePhoneVerifications } from './phoneVerify.js';
 import { caseCommands, isCaseComponent, handleCaseComponent, handleCaseAutocomplete } from './cases.js';
 import { countCommands, onCountingMessage, onCountingDelete } from './counting.js';
 import { alarmCommands, handleAlarmAutocomplete, startAlarms } from './alarms.js';
@@ -110,6 +111,7 @@ client.once(Events.ClientReady, (c) => {
   startLeaderboardUpdater(client);
   startBirthdayScheduler(client);
   startAlarms(client);
+  resumePhoneVerifications(client);
   reconcileLobbies(client).catch((err) => console.error('Draft lobby reconcile failed:', err.message));
   // Warm the map list so the first autocomplete after a restart is instant.
   kzApi.getAllMaps().catch((err) => console.error('Could not pre-load the map list:', err.message));

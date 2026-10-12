@@ -7,6 +7,7 @@
 
 import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import { config } from './config.js';
+import { phoneVerifyOn } from './phoneVerify.js';
 import { commandData } from './commands.js';
 import { birthdayCommandData } from './birthday.js';
 import { draftCommandData } from './draft.js';
@@ -126,7 +127,7 @@ const TOPICS = {
       {
         name: 'Before you can join',
         value:
-          `You need a phone number saved — \`/${R.phoneRoot} set\`, 8 digits like \`9911 2233\`. It is how the host reaches the people who signed up.\n` +
+          `You need a ${phoneVerifyOn() ? 'verified ' : ''}phone number saved — \`/${R.phoneRoot} set\`, 8 digits like \`9911 2233\`. It is how the host reaches the people who signed up.\n` +
           'It stays private: replies about it are only visible to you, it never appears in a channel, and only the owner and developer roles can look it up.',
       },
       {
@@ -324,7 +325,9 @@ const TOPICS = {
         name: 'Phone numbers',
         value:
           'Every reply is private, so a number never appears in a channel. You can always see your own; only the owner and developer roles can look anyone else up or list them.\n' +
-          'Numbers take 8 digits (`9911 2233`) or any international number starting with `+`.',
+          (phoneVerifyOn()
+            ? 'Numbers take 8 digits (`9911 2233`). To prove the number is yours the bot gives you a code to text to **144773** from that phone (an ordinary paid SMS, about 150₮) — it is saved the moment the text arrives.'
+            : 'Numbers take 8 digits (`9911 2233`) or any international number starting with `+`.'),
       },
     ],
   },

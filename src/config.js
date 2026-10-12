@@ -68,6 +68,11 @@ export const config = {
     .split(',')
     .map((r) => r.trim())
     .filter(Boolean),
+  // SMS verification of phone numbers through https://verify.mn — the member
+  // texts a code from the number before it is saved. Unset = numbers are taken
+  // on trust. The key comes from the verify.mn Developer Console ("vrf_…").
+  verifyApiKey: process.env.VERIFY_MN_API_KEY?.trim() || null,
+  verifyApiBase: (process.env.VERIFY_MN_API_BASE || 'https://api.verify.mn').replace(/\/+$/, ''),
   // Profile-card backgrounds, unboxed from cases like CS2 skins.
   caseRoot: rootName(process.env.CASE_COMMAND_ROOT, 'sgcase'),
   caseDailySeeds: Math.max(0, numberOr(process.env.CASE_DAILY_SEEDS, 25)), // free seeds with the daily case

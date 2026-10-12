@@ -20,6 +20,7 @@ import {
 import { config } from './config.js';
 import * as store from './store.js';
 import * as kz from './kzApi.js';
+import { phoneVerifyOn, verifyAndSavePhone } from './phoneVerify.js';
 import { savedContacts, steamLink, parseInstagram, parsePhone, parseSteam, formatPhone } from './contacts.js';
 import { steamIdTo64 } from './steamid.js';
 import { parseBirthdayText, birthdayLabel } from './birthday.js';
@@ -320,6 +321,14 @@ export async function handleProfileModal(interaction) {
     return interaction.reply({
       flags: MessageFlags.Ephemeral,
       content: `❌ I couldn't read that ${field.label.toLowerCase()} — ${field.hint}.`,
+    });
+  }
+  // A phone number isn't saved on the member's say-so: it goes through the SMS
+  // check first, and the card is redrawn only once that succeeds.
+  if (kind === 'phone' && phoneVerifyOn()) {
+    return verifyAndSavePhone(interaction, value, {
+      show: (n) => `\`${formatPhone(n)}\``,
+      onSaved: async () => interaction.message?.edit(await buildProfile(interaction, interaction.user)).catch(() => {}),
     });
   }
   field.save(interaction.guildId, ownerId, value);

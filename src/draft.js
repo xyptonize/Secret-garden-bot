@@ -35,6 +35,7 @@ import { config } from './config.js';
 import { awardChampions } from './cases.js';
 import { settleMatch, refundLobby } from './betting.js';
 import { isStaff, staffText } from './staff.js';
+import { phoneVerifyOn, isPhoneVerified } from './phoneVerify.js';
 import * as store from './store.js';
 import {
   draft,
@@ -199,7 +200,7 @@ function lobbyEmbed(lobby, budget = EMBED_TOTAL) {
 
   const n = lobby.players.length;
   const need = n < MIN_PLAYERS ? ` · need ${MIN_PLAYERS - n} more` : '';
-  const phoneNote = config.draftRequirePhone ? ` · 📱 /${config.phoneRoot} set needed to join` : '';
+  const phoneNote = config.draftRequirePhone ? ` · 📱 ${phoneVerifyOn() ? 'verified ' : ''}/${config.phoneRoot} set needed to join` : '';
   const teams = lobby.result ? `${lobby.result.teams.length} teams` : 'host picks the number of teams at Draft';
   const embed = new EmbedBuilder()
     .setColor(lobby.closed ? 0x95a5a6 : 0xe67e22)
@@ -603,18 +604,34 @@ export const lobbyView = (lobby) => view(lobby);
  */
 /**
  * Why someone can't join, or null. A saved phone number is the price of entry:
- * the host needs a way to reach the people who signed up for the game.
+ * the host needs a way to reach the people who signed up for the game. With
+ * SMS verification on, the number must also be one they proved is theirs —
+ * a number that was only typed in reaches nobody.
  */
 function joinBlocked(guildId, userId) {
   if (!config.draftRequirePhone) return null;
-  if (store.getContacts(guildId, 'phone')[userId]) return null;
-  return (
-    `📱 You need a phone number saved before you can join a draft.\n` +
-    `Run \`/${config.phoneRoot} set\` — it takes 8 digits like \`9911 2233\`.\n\n` +
+  const saved = store.getContacts(guildId, 'phone')[userId];
+  if (saved && (!phoneVerifyOn() || isPhoneVerified(guildId, userId))) return null;
+  const privacy =
     `_It stays private: every reply about it is only visible to you, it never appears in a channel, ` +
-    `and only the owner and developer roles can look it up._`
+    `and only the owner and developer roles can look it up._`;
+  if (saved) {
+    return (
+      `📱 Your phone number is saved but not verified, and drafts now need a verified one.\n` +
+      `Run \`/${config.phoneRoot} set\` with your number again — the bot gives you a code to text to **144773** from that phone.\n\n` +
+      privacy
+    );
+  }
+  return (
+    `📱 You need a ${phoneVerifyOn() ? 'verified ' : ''}phone number saved before you can join a draft.\n` +
+    `Run \`/${config.phoneRoot} set\` — it takes 8 digits like \`9911 2233\`.\n\n` +
+    privacy
   );
 }
+
+/** The same rule, worded for a host about someone else: "<who> has …, so they can't be added." */
+const phoneMissing = (guildId, userId) =>
+  store.getContacts(guildId, 'phone')[userId] ? 'a phone number that isn’t verified yet' : 'no phone number saved';
 
 function addPlayer(lobby, profile) {
   lobby.players.push(profile);
@@ -1506,7 +1523,7 @@ async function handleLobbyAction(interaction) {
       if (joinBlocked(interaction.guildId, incoming.id)) {
         return answer({
           content:
-            `📱 <@${incoming.id}> has no phone number saved, so they can't be subbed in. ` +
+            `📱 <@${incoming.id}> has ${phoneMissing(interaction.guildId, incoming.id)}, so they can't be subbed in. ` +
             `Ask them to run \`/${config.phoneRoot} set\` first.`,
           components: [],
           allowedMentions: { parse: [] },
@@ -1883,7 +1900,7 @@ async function editPlayers(interaction, add) {
     if (joinBlocked(interaction.guildId, user.id)) {
       return say(
         interaction,
-        `📱 ${user} has no phone number saved, so they can't be added. ` +
+        `📱 ${user} has ${phoneMissing(interaction.guildId, user.id)}, so they can't be added. ` +
           `Ask them to run \`/${config.phoneRoot} set\` — it's private, and only the owner and developer roles can see it.`,
       );
     }
@@ -1956,7 +1973,7 @@ async function subCommand(interaction) {
   if (joinBlocked(interaction.guildId, inUser.id)) {
     return say(
       interaction,
-      `📱 ${inUser} has no phone number saved, so they can't be subbed in. ` +
+      `📱 ${inUser} has ${phoneMissing(interaction.guildId, inUser.id)}, so they can't be subbed in. ` +
         `Ask them to run \`/${config.phoneRoot} set\` first.`,
     );
   }

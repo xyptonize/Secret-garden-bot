@@ -5,7 +5,9 @@
 //   /sgig    — public. Anyone can view a handle or list everyone's.
 //   /sgphone — private. Only the member themselves and the roles named in
 //              PHONE_ROLES (plus the server owner) can see a number, and every
-//              reply is ephemeral. There is no public list.
+//              reply is ephemeral. There is no public list. With a verify.mn
+//              key set, a number is only saved once the member has texted
+//              a code from it (see phoneVerify.js).
 //
 // Saved in data/store.json under guild.contacts.{ig,phone}.
 
@@ -13,6 +15,7 @@ import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags, e
 import { config } from './config.js';
 import * as store from './store.js';
 import { parseSteamId, steamIdTo64 } from './steamid.js';
+import { phoneVerifyOn, isPhoneVerified, verifyAndSavePhone } from './phoneVerify.js';
 
 const LIST_LIMIT = 4000; // embed description budget
 const IG_HANDLE = /^[a-zA-Z0-9._]{1,30}$/;
@@ -125,10 +128,12 @@ export function steamLink(stored) {
 
 /**
  * One contact kind. `parse` normalizes what the member typed, `show` renders a
- * stored value, and `private` decides whether replies are ephemeral and whether
- * looking someone else up needs Manage Server.
+ * stored value (and is told whose it is), and `private` decides whether replies
+ * are ephemeral and whether looking someone else up needs Manage Server.
+ * `saveVia`, when given, takes over saving a parsed value — it may return
+ * nothing to leave it to the ordinary path.
  */
-function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, isPrivate }) {
+function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, isPrivate, saveVia }) {
   const reply = (interaction, content, options = {}) =>
     interaction.reply({
       content,
@@ -140,6 +145,8 @@ function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, 
   async function set(interaction) {
     const value = parse(interaction.options.getString('value', true));
     if (!value) return ephemeral(interaction, `❌ That doesn't look like ${aLabel}. ${hint}`);
+    const taken = saveVia?.(interaction, value);
+    if (taken) return taken;
     store.setContact(interaction.guildId, kind, interaction.user.id, value);
     return ephemeral(interaction, `${emoji} Saved your ${label}: ${show(value)}`);
   }
@@ -157,7 +164,7 @@ function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, 
         self ? `You haven't saved ${aLabel} yet.` : `${target} hasn't saved ${aLabel}.`,
       );
     }
-    return reply(interaction, `${emoji} ${target} · ${show(value)}`);
+    return reply(interaction, `${emoji} ${target} · ${show(value, interaction.guildId, target.id)}`);
   }
 
   async function remove(interaction) {
@@ -167,6 +174,10 @@ function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, 
     }
     const target = user || interaction.user;
     const existed = store.removeContact(interaction.guildId, kind, target.id);
+    if (kind === 'phone') {
+      store.removeContact(interaction.guildId, 'phoneVerified', target.id);
+      store.removeContact(interaction.guildId, 'phonePending', target.id);
+    }
     return ephemeral(
       interaction,
       existed ? `✅ Removed ${target}'s ${label}.` : `ℹ️ No ${label} saved for ${target}.`,
@@ -184,7 +195,7 @@ function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, 
     const lines = [];
     let used = 0;
     for (const [id, value] of all) {
-      const line = `<@${id}> · ${show(value)}`;
+      const line = `<@${id}> · ${show(value, interaction.guildId, id)}`;
       if (used + line.length + 1 > LIST_LIMIT - 40) break;
       lines.push(line);
       used += line.length + 1;
@@ -259,9 +270,17 @@ const phone = contact({
   plural: 'Phone numbers',
   emoji: '📱',
   isPrivate: true,
-  hint: `An ${config.phoneLocalDigits}-digit number (e.g. 9911 2233) or an international one starting with +.`,
+  hint: phoneVerifyOn()
+    ? `Your ${config.phoneLocalDigits}-digit number (e.g. 9911 2233). You confirm it by SMS.`
+    : `An ${config.phoneLocalDigits}-digit number (e.g. 9911 2233) or an international one starting with +.`,
   parse: parsePhone,
-  show: (value) => `\`${formatPhone(value)}\``,
+  // With verification on, whoever may see a number also sees whether it was
+  // proven — numbers saved before then stand out as the ones to chase up.
+  show: (value, guildId, userId) =>
+    `\`${formatPhone(value)}\`` +
+    (phoneVerifyOn() && userId ? (isPhoneVerified(guildId, userId) ? ' ✅' : ' ⚠️ not verified') : ''),
+  saveVia: (interaction, value) =>
+    phoneVerifyOn() ? verifyAndSavePhone(interaction, value, { show: (n) => `\`${formatPhone(n)}\`` }) : null,
 });
 
 const steam = contact({
