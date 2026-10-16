@@ -305,6 +305,7 @@ Members save their own; `/sgig` is public, `/sgphone` is private.
 | `/sgphone view [user]` | you / `PHONE_ROLES` | **Private reply.** Only you can see your own; only the allowed roles can look up someone else's. |
 | `/sgphone list` | `PHONE_ROLES` | **Private reply.** Everyone's numbers. Anyone else gets "🔒 Phone numbers are private — only @OWNER👻, @Discord Developer, @Developer can list them". |
 | `/sgphone remove [user]` | anyone / admins | Remove yours; admins can remove anyone's. |
+| `/sgphone verify <user> [number]` | `PHONE_ROLES` | **Private reply.** Mark someone's number as verified without the SMS — for when the text can't get through but you know the number is real. Give `number` to save one for them at the same time. Shown as **✅ (by an admin)** in `view` and `list`, so it's clear it wasn't proven by SMS; if they later verify by SMS themselves, that mark goes away. |
 | `/sgsteam set <value>` | anyone | Save your Steam profile. Accepts a `steamcommunity.com/id/…` or `/profiles/…` link, a SteamID64, `STEAM_1:0:…` or `[U:1:…]`. |
 | `/sgsteam view [user]` / `list` / `remove [user]` | anyone | Same as `/sgig`, public. |
 

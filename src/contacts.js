@@ -15,7 +15,7 @@ import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags, e
 import { config } from './config.js';
 import * as store from './store.js';
 import { parseSteamId, steamIdTo64 } from './steamid.js';
-import { phoneVerifyOn, isPhoneVerified, verifyAndSavePhone } from './phoneVerify.js';
+import { phoneVerifyOn, isPhoneVerified, phoneVerifiedByAdmin, forceVerifyPhone, verifyAndSavePhone } from './phoneVerify.js';
 
 const LIST_LIMIT = 4000; // embed description budget
 const IG_HANDLE = /^[a-zA-Z0-9._]{1,30}$/;
@@ -131,9 +131,10 @@ export function steamLink(stored) {
  * stored value (and is told whose it is), and `private` decides whether replies
  * are ephemeral and whether looking someone else up needs Manage Server.
  * `saveVia`, when given, takes over saving a parsed value — it may return
- * nothing to leave it to the ordinary path.
+ * nothing to leave it to the ordinary path. `verify`, when given, adds an
+ * admin-only `verify` subcommand.
  */
-function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, isPrivate, saveVia }) {
+function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, isPrivate, saveVia, verify }) {
   const reply = (interaction, content, options = {}) =>
     interaction.reply({
       content,
@@ -177,6 +178,7 @@ function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, 
     if (kind === 'phone') {
       store.removeContact(interaction.guildId, 'phoneVerified', target.id);
       store.removeContact(interaction.guildId, 'phonePending', target.id);
+      store.removeContact(interaction.guildId, 'phoneVerifiedBy', target.id);
     }
     return ephemeral(
       interaction,
@@ -214,7 +216,26 @@ function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, 
     });
   }
 
-  const handlers = { set, view, remove, list };
+  /**
+   * An admin marks someone's number as verified without the SMS. Restricted to
+   * the same roles that may see numbers: vouching for one means looking at it.
+   */
+  async function forceVerify(interaction) {
+    if (!canSeePrivate(interaction)) {
+      return ephemeral(interaction, `🔒 Only ${whoCanSee()} can verify someone's ${label}.`);
+    }
+    const target = interaction.options.getUser('user', true);
+    const typed = interaction.options.getString('number');
+    const value = typed ? parse(typed) : store.getContacts(interaction.guildId, kind)[target.id];
+    if (typed && !value) return ephemeral(interaction, `❌ That doesn't look like ${aLabel}. ${hint}`);
+    if (!value) {
+      return ephemeral(interaction, `${target} hasn't saved ${aLabel} — give it in \`number\` to save and verify it in one go.`);
+    }
+    verify(interaction.guildId, target.id, value, interaction.user.id);
+    return ephemeral(interaction, `✅ Verified ${target}'s ${label}: ${show(value, interaction.guildId, target.id)}`);
+  }
+
+  const handlers = { set, view, remove, list, ...(verify ? { verify: forceVerify } : {}) };
 
   const data = new SlashCommandBuilder()
     .setName(root)
@@ -241,6 +262,17 @@ function contact({ kind, root, label, aLabel, plural, emoji, parse, show, hint, 
     .addSubcommand((s) =>
       s.setName('list').setDescription(isPrivate ? `(Restricted) Everyone's ${label}.` : `Everyone's ${label}.`),
     );
+  if (verify) {
+    data.addSubcommand((s) =>
+      s
+        .setName('verify')
+        .setDescription(`(Admin) Mark someone's ${label} as verified, without the SMS.`)
+        .addUserOption((o) => o.setName('user').setDescription('Whose').setRequired(true))
+        .addStringOption((o) =>
+          o.setName('number').setDescription('Save this number for them first (default: the one they saved)').setMaxLength(60),
+        ),
+    );
+  }
 
   return {
     root,
@@ -278,9 +310,14 @@ const phone = contact({
   // proven — numbers saved before then stand out as the ones to chase up.
   show: (value, guildId, userId) =>
     `\`${formatPhone(value)}\`` +
-    (phoneVerifyOn() && userId ? (isPhoneVerified(guildId, userId) ? ' ✅' : ' ⚠️ not verified') : ''),
+    (phoneVerifyOn() && userId
+      ? isPhoneVerified(guildId, userId)
+        ? phoneVerifiedByAdmin(guildId, userId) ? ' ✅ (by an admin)' : ' ✅'
+        : ' ⚠️ not verified'
+      : ''),
   saveVia: (interaction, value) =>
     phoneVerifyOn() ? verifyAndSavePhone(interaction, value, { show: (n) => `\`${formatPhone(n)}\`` }) : null,
+  verify: forceVerifyPhone,
 });
 
 const steam = contact({

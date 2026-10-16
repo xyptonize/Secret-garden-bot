@@ -13,6 +13,8 @@
 // Saved in data/store.json under guild.contacts.phoneVerified = { discordId: number }.
 // A number counts as verified only while it matches the one saved. Waits in
 // progress are kept under guild.contacts.phonePending so a restart can resume them.
+// A number an admin vouched for instead (/sgphone verify) also records who, under
+// guild.contacts.phoneVerifiedBy = { discordId: adminId }.
 
 import { randomInt } from 'node:crypto';
 import { MessageFlags, InteractionWebhook } from 'discord.js';
@@ -32,6 +34,27 @@ export const phoneVerifyOn = () => Boolean(config.verifyApiKey);
 export function isPhoneVerified(guildId, userId) {
   const saved = store.getContacts(guildId, 'phone')[userId];
   return Boolean(saved) && store.getContacts(guildId, 'phoneVerified')[userId] === saved;
+}
+
+/** Whether that verification came from an admin rather than an SMS. */
+export const phoneVerifiedByAdmin = (guildId, userId) =>
+  isPhoneVerified(guildId, userId) ? store.getContacts(guildId, 'phoneVerifiedBy')[userId] || null : null;
+
+/**
+ * An admin vouches for someone's number — for when the SMS can't get through
+ * (no credit, a work phone, the shortcode blocked) but they know it's real.
+ * Saves the number as verified and drops any code the member was waiting on.
+ */
+export function forceVerifyPhone(guildId, userId, number, adminId) {
+  const waiting = pending.get(`${guildId}:${userId}`);
+  if (waiting) {
+    waiting.cancelled = true;
+    waiting.reason = '✅ An admin has verified your number, so there is no need to send the SMS.';
+  }
+  store.removeContact(guildId, 'phonePending', userId);
+  store.setContact(guildId, 'phone', userId, number);
+  store.setContact(guildId, 'phoneVerified', userId, number);
+  store.setContact(guildId, 'phoneVerifiedBy', userId, adminId);
 }
 
 /** "+97699112233" -> "99112233", or null for a number from another country. */
@@ -79,7 +102,7 @@ async function awaitText({ guildId, userId, job, sessionId, number, expires, edi
   let status = await sessionStatus(sessionId).catch(() => 'PENDING');
   while (status === 'PENDING' && Date.now() < deadline) {
     await sleep(POLL_MS);
-    if (job.cancelled) return edit('↩️ You asked for a new code, so this one was dropped.');
+    if (job.cancelled) return edit(job.reason || '↩️ You asked for a new code, so this one was dropped.');
     // One failed check is not a failed verification: keep asking until the deadline.
     status = await sessionStatus(sessionId).catch(() => 'PENDING');
   }
@@ -94,6 +117,7 @@ async function awaitText({ guildId, userId, job, sessionId, number, expires, edi
   }
   store.setContact(guildId, 'phone', userId, number);
   store.setContact(guildId, 'phoneVerified', userId, number);
+  store.removeContact(guildId, 'phoneVerifiedBy', userId); // proven by SMS now, not on anyone's word
   await edit(`✅ Verified and saved your phone number: ${show(number)}`);
   await onSaved?.();
   return undefined;

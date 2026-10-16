@@ -327,7 +327,8 @@ const TOPICS = {
           'Every reply is private, so a number never appears in a channel. You can always see your own; only the owner and developer roles can look anyone else up or list them.\n' +
           (phoneVerifyOn()
             ? 'Numbers take 8 digits (`9911 2233`). To prove the number is yours the bot gives you a code to text to **144773** from that phone (an ordinary paid SMS, about 150₮) — it is saved the moment the text arrives.'
-            : 'Numbers take 8 digits (`9911 2233`) or any international number starting with `+`.'),
+            : 'Numbers take 8 digits (`9911 2233`) or any international number starting with `+`.') +
+          `\nIf the SMS can't get through, the owner and developer roles can vouch for a number with \`/${R.phoneRoot} verify\`.`,
       },
     ],
   },
