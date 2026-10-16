@@ -47,6 +47,7 @@ export const config = {
     .split(',')
     .map((r) => r.trim())
     .filter(Boolean),
+  draftAuraInfinity: numberOr(process.env.DRAFT_AURA_INFINITY, -0.5), // above GOD: lower = stronger
   draftAuraGod: numberOr(process.env.DRAFT_AURA_GOD, 0),
   draftAuraKing: numberOr(process.env.DRAFT_AURA_KING, 0.5),
   draftDefaultAura: numberOr(process.env.DRAFT_DEFAULT_AURA, 5.5), // players with no AURA role

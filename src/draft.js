@@ -90,11 +90,15 @@ const LOCKED_DURING_BRACKET = new Set([
 // Player stats from roles
 // ---------------------------------------------------------------------------
 
-/** "AURA - 3.5" -> 3.5, "AURA - KING" -> config value; null if not an aura role. */
+/**
+ * "AURA - 3.5" -> 3.5, "AURA - KING" -> config value; null if not an aura role.
+ * The named tiers sit above AURA - 1, strongest first: INFINITY, GOD, KING.
+ */
 function auraFromRoleName(name) {
   const m = /^AURA\s*-\s*(.+)$/i.exec(name.trim());
   if (!m) return null;
   const value = m[1].trim().toUpperCase();
+  if (value === 'INFINITY' || value === '∞') return { aura: config.draftAuraInfinity, label: 'INFINITY' };
   if (value === 'GOD') return { aura: config.draftAuraGod, label: 'GOD' };
   if (value === 'KING') return { aura: config.draftAuraKing, label: 'KING' };
   const n = Number(value);
@@ -554,8 +558,8 @@ function ensureRecord(lobby, key, guildId) {
 // Mock players (/sgdraft mock) — for trying the whole flow in Discord
 // ---------------------------------------------------------------------------
 
-// Roughly the spread of AURA roles on the server, mid-heavy, a few KING/GOD.
-const MOCK_AURAS = ['GOD', 'KING', '1', '1.5', '2', '2.5', '3', '3', '3.5', '4', '4', '4.5', '5', '5', '5.5', '6', '6.5', '7', '7.5', '8', '9', '10'];
+// Roughly the spread of AURA roles on the server, mid-heavy, a few INFINITY/GOD/KING.
+const MOCK_AURAS = ['INFINITY', 'GOD', 'KING', '1', '1.5', '2', '2.5', '3', '3', '3.5', '4', '4', '4.5', '5', '5', '5.5', '6', '6.5', '7', '7.5', '8', '9', '10'];
 
 /**
  * Add `count` fake players. They're never looked up in Discord or pinged, and
